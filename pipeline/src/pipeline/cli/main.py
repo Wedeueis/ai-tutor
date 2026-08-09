@@ -284,5 +284,17 @@ def search(query: str, k: int = 5) -> None:
         typer.echo(f"{match.score:.3f}  {match.concept_id}")
 
 
+@app.command(name="mcp-serve")
+def mcp_serve(
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(8000, "--port"),
+    stateless: bool = typer.Option(True, "--stateless/--stateful"),
+) -> None:
+    """Serve the vault to MCP clients (e.g. Claude) over Streamable HTTP."""
+    from pipeline.mcp.server import run as run_mcp_server
+
+    run_mcp_server(host=host, port=port, stateless=stateless)
+
+
 if __name__ == "__main__":
     app()
