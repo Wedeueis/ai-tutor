@@ -73,3 +73,34 @@ def test_no_discovered_source_documents_yields_no_outcomes():
     use_case = ParseSourceDocuments(intake_repository, FakeDocumentParsing({}), FakeImageCaptioning())
 
     assert use_case.run() == []
+
+
+def test_one_document_failing_unexpectedly_does_not_abort_the_batch():
+    now = datetime.now(UTC)
+    good = _source_item(path="raw/good.pdf")
+    bad = IntakeItem(
+        id="source-bad",
+        kind=IntakeKind.SOURCE_DOCUMENT,
+        state=IntakeState.DISCOVERED,
+        path="raw/unregistered.pdf",  # not in `parsing`'s dict -> parse() raises KeyError
+        discovered_at=now,
+        updated_at=now,
+    )
+    intake_repository = FakeIntakeRepository(items=[bad, good])
+    parsing = FakeDocumentParsing({"raw/good.pdf": ParsedDocument(text="# Report\n\nfindings.")})
+    use_case = ParseSourceDocuments(intake_repository, parsing, FakeImageCaptioning())
+
+    outcomes = use_case.run()
+
+    bad_outcome, good_outcome = outcomes
+    assert bad_outcome.source_id == "source-bad"
+    assert bad_outcome.errored is not None
+    assert bad_outcome.chunk_ids == []
+    assert intake_repository.get("source-bad").state is IntakeState.ERROR
+    assert intake_repository.get("source-bad").error_message
+
+    # The document after the failing one was still parsed.
+    assert good_outcome.source_id == "source-1"
+    assert good_outcome.errored is None
+    assert len(good_outcome.chunk_ids) == 1
+    assert intake_repository.get("source-1").state is IntakeState.PARSED

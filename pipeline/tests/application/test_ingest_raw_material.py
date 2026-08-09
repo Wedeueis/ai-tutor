@@ -190,3 +190,54 @@ def test_nothing_extracted_still_marks_processed_not_rejected():
     assert raw_material_repository.processed == ["raw-1"]
     assert raw_material_repository.rejected == {}
     assert bundle_log.entries == []
+
+
+class _RaisingExtractionSkill:
+    """Simulates an unexpected failure (e.g. Ollama unreachable, an unparsable
+    skill response) on one specific raw item, to test that IngestRawMaterial
+    isolates it rather than aborting the whole batch."""
+
+    def __init__(self, drafts_by_raw_id, raises_for: str) -> None:
+        self._drafts_by_raw_id = drafts_by_raw_id
+        self._raises_for = raises_for
+
+    def extract(self, raw):
+        if raw.id == self._raises_for:
+            raise RuntimeError("Ollama request to /api/generate failed after 4 attempt(s)")
+        return self._drafts_by_raw_id.get(raw.id, [])
+
+
+def test_one_item_failing_unexpectedly_does_not_abort_the_batch():
+    good_draft = DraftConcept(
+        frontmatter=Frontmatter(type="Unclassified", title="Cold Brew"),
+        body="Cold brew steeps for 12-24 hours.",
+        source_raw_id="raw-good",
+    )
+    raw_bad = RawItem(id="raw-bad", content="whatever")
+    raw_good = RawItem(id="raw-good", content="Cold brew steeps for 12-24 hours.")
+
+    use_case, concept_repository, raw_material_repository, bundle_log = _build(
+        [raw_bad, raw_good], {"raw-good": [good_draft]}
+    )
+    # Swap in a skill that blows up for raw-bad only, after _build already
+    # wired the (working) fakes for everything else.
+    use_case._knowledge_agent._extraction = _RaisingExtractionSkill(
+        {"raw-good": [good_draft]}, raises_for="raw-bad"
+    )
+
+    outcomes = use_case.run()
+
+    bad_outcome, good_outcome = outcomes
+    assert bad_outcome.raw_id == "raw-bad"
+    assert bad_outcome.errored is not None
+    assert bad_outcome.created == []
+    assert "raw-bad" in raw_material_repository.errored
+    assert "raw-bad" not in raw_material_repository.processed
+
+    # The item after the failing one was still processed — one bad item
+    # doesn't take down the rest of the batch.
+    assert good_outcome.raw_id == "raw-good"
+    assert good_outcome.errored is None
+    assert len(good_outcome.created) == 1
+    assert "raw-good" in raw_material_repository.processed
+    assert any("Creation" in entry for entry in bundle_log.entries)

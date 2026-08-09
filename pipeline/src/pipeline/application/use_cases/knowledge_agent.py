@@ -5,6 +5,7 @@ itself (see ingest_raw_material.py)."""
 
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
 
 from pipeline.application.ports.concept_repository import ConceptRepositoryPort
@@ -36,6 +37,8 @@ from pipeline.domain.raw_material import RawItem
 
 DEFAULT_DISAMBIGUATION_CONFIDENCE_THRESHOLD = 0.75
 DOMAIN_TYPE = "Domain"
+
+logger = logging.getLogger(__name__)
 
 
 class KnowledgeAgent:
@@ -69,6 +72,7 @@ class KnowledgeAgent:
 
     def run(self, raw: RawItem) -> AgentResult:
         drafts = self._extraction.extract(raw)
+        logger.debug("knowledge_agent: raw/%s -> %d draft(s)", raw.id, len(drafts))
 
         decisions: list[CreateDecision | MergeDecision | RejectDecision] = []
         for draft in drafts:
@@ -81,6 +85,12 @@ class KnowledgeAgent:
             merged_into: ConceptId | None = None
             if candidates:
                 verdict = self._disambiguation.disambiguate(draft, candidates)
+                logger.debug(
+                    "knowledge_agent: disambiguation same_as=%s confidence=%.2f (threshold=%.2f)",
+                    verdict.same_as,
+                    verdict.confidence,
+                    self._threshold,
+                )
                 if verdict.same_as is not None and verdict.confidence >= self._threshold:
                     merged_into = verdict.same_as
 
@@ -89,6 +99,12 @@ class KnowledgeAgent:
             )
             scores = self._quality_eval.evaluate(draft, rubrics, raw.content)
             eval_result = aggregate_scores(scores, threshold=self._eval_threshold)
+            logger.debug(
+                "knowledge_agent: eval average=%.2f passed=%s (threshold=%.2f)",
+                eval_result.average_score,
+                eval_result.passed,
+                self._eval_threshold,
+            )
 
             if merged_into is not None:
                 if eval_result.passed:

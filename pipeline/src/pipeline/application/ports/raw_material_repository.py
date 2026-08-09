@@ -15,4 +15,12 @@ class RawMaterialRepositoryPort(Protocol):
 
     def mark_rejected(self, raw_id: str, reason: str) -> None: ...
 
+    def mark_error(self, raw_id: str, message: str) -> None:
+        """An unexpected failure (not a quality-eval rejection) interrupted
+        processing — e.g. Ollama was unreachable, a skill's response couldn't
+        be parsed. Distinct from `mark_rejected`: this is retryable via
+        `pipeline retry <item-id>` once the underlying cause is fixed, whereas
+        a rejection is a considered decision the KnowledgeAgent made."""
+        ...
+
     def link_concept(self, raw_id: str, concept_id: str) -> None: ...

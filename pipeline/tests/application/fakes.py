@@ -41,13 +41,16 @@ class FakeRawMaterialRepository:
         self.items = list(items or [])
         self.processed: list[str] = []
         self.rejected: dict[str, str] = {}
+        self.errored: dict[str, str] = {}
         self.concept_links: dict[str, list[str]] = {}
 
     def list_unprocessed(self) -> list[RawItem]:
         return [
             item
             for item in self.items
-            if item.id not in self.processed and item.id not in self.rejected
+            if item.id not in self.processed
+            and item.id not in self.rejected
+            and item.id not in self.errored
         ]
 
     def mark_processed(self, raw_id: str) -> None:
@@ -55,6 +58,9 @@ class FakeRawMaterialRepository:
 
     def mark_rejected(self, raw_id: str, reason: str) -> None:
         self.rejected[raw_id] = reason
+
+    def mark_error(self, raw_id: str, message: str) -> None:
+        self.errored[raw_id] = message
 
     def link_concept(self, raw_id: str, concept_id: str) -> None:
         self.concept_links.setdefault(raw_id, []).append(concept_id)

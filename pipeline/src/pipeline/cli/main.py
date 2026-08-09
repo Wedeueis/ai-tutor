@@ -198,7 +198,10 @@ def parse_sources() -> None:
         typer.echo("No source documents to parse.")
         return
     for outcome in outcomes:
-        typer.echo(f"parsed {outcome.source_id[:12]}  -> {len(outcome.chunk_ids)} chunk(s)")
+        if outcome.errored:
+            typer.echo(f"error parsing {outcome.source_id[:12]}  — {outcome.errored}")
+        else:
+            typer.echo(f"parsed {outcome.source_id[:12]}  -> {len(outcome.chunk_ids)} chunk(s)")
 
 
 @app.command()
@@ -211,6 +214,9 @@ def ingest() -> None:
         typer.echo("Nothing to ingest.")
         return
     for outcome in outcomes:
+        if outcome.errored:
+            typer.echo(f"error raw/{outcome.raw_id}  — {outcome.errored}")
+            continue
         for concept_id in outcome.created:
             typer.echo(f"created {concept_id}  (from raw/{outcome.raw_id})")
         for concept_id in outcome.merged_into:

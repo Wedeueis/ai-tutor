@@ -5,8 +5,9 @@ a chunk is just another DB-only IntakeItem in state `discovered`."""
 from __future__ import annotations
 
 import hashlib
+import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pipeline.application.ports.intake_repository import IntakeRepositoryPort
 from pipeline.application.ports.parsing import DocumentParsingPort
@@ -14,11 +15,18 @@ from pipeline.application.ports.skills.image_captioning import ImageCaptioningSk
 from pipeline.domain.chunking import DEFAULT_MAX_CHARS, chunk_markdown
 from pipeline.domain.intake import IntakeItem, IntakeKind, IntakeState
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class ParseOutcome:
     source_id: str
     chunk_ids: list[str] = field(default_factory=list)
+    errored: str | None = None
+    """Set when parsing this source document raised unexpectedly (Docling
+    failure, captioning skill unreachable, ...). The source is marked
+    `IntakeState.ERROR` (retryable via `pipeline retry <item-id>`) instead of
+    `PARSED`, and every other source in the batch still gets processed."""
 
 
 class ParseSourceDocuments:
@@ -38,7 +46,26 @@ class ParseSourceDocuments:
         sources = self._intake_repository.list_by_state(
             IntakeState.DISCOVERED, kind=IntakeKind.SOURCE_DOCUMENT
         )
-        return [self._parse_one(source) for source in sources]
+        logger.info("parse-sources: %d source document(s) to parse", len(sources))
+        outcomes = []
+        for source in sources:
+            try:
+                outcome = self._parse_one(source)
+            except Exception as exc:  # noqa: BLE001 - isolate one bad document, keep the batch going
+                logger.exception(
+                    "parse-sources: %s failed unexpectedly, marking as error", source.id
+                )
+                source.state = IntakeState.ERROR
+                source.error_message = str(exc)
+                source.updated_at = datetime.now(UTC)
+                self._intake_repository.upsert(source)
+                outcome = ParseOutcome(source_id=source.id, errored=str(exc))
+            else:
+                logger.info(
+                    "parse-sources: %s -> %d chunk(s)", source.id, len(outcome.chunk_ids)
+                )
+            outcomes.append(outcome)
+        return outcomes
 
     def _parse_one(self, source: IntakeItem) -> ParseOutcome:
         parsed = self._parsing.parse(source.path)
@@ -48,7 +75,7 @@ class ParseSourceDocuments:
             caption = self._image_captioning.caption(image)
             text = text.replace(image.anchor, f"[image: {caption}]")
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         chunk_ids = []
         for index, chunk_text in enumerate(chunk_markdown(text, self._max_chunk_chars)):
             chunk_id = hashlib.sha256(f"{source.id}:{index}:{chunk_text}".encode()).hexdigest()
