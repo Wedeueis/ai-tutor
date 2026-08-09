@@ -1,0 +1,53 @@
+site_name: OKF Pipeline
+site_description: Local-only ingestion, indexing, and MCP-serving pipeline for the OKF vault
+repo_url: ""
+docs_dir: docs
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: teal
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: teal
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - toc.follow
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Developer Onboarding: onboarding.md
+  - Architecture:
+      - Overview: architecture/overview.md
+      - Domain model: architecture/domain-model.md
+      - Ports & adapters: architecture/ports-and-adapters.md
+      - Data flow: architecture/data-flow.md
+  - Reference:
+      - CLI: reference/cli.md
+      - MCP server: reference/mcp-server.md
+      - Configuration: reference/configuration.md
+      - Use cases: reference/use-cases.md
+      - Testing: reference/testing.md
