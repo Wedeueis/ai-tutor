@@ -321,6 +321,7 @@ def mcp_serve(
         host=host if host is not None else settings.mcp_host,
         port=port if port is not None else settings.mcp_port,
         stateless=stateless if stateless is not None else settings.mcp_stateless,
+        auth_token=settings.mcp_auth_token,
     )
 
 
