@@ -17,6 +17,16 @@ class ConceptId:
     def __post_init__(self) -> None:
         if not self.value or self.value.endswith(".md"):
             raise ValueError(f"invalid concept id: {self.value!r}")
+        # Every ConceptId eventually becomes a filesystem path (see
+        # MarkdownConceptRepository._path_for) — reject anything that could
+        # escape the vault root (absolute paths, `..`/`.` segments, empty
+        # segments from `//`, backslashes) here, once, rather than trusting
+        # every caller (including the MCP server, which takes ids from
+        # untrusted remote input) to sanitize its own input.
+        if self.value.startswith("/") or "\\" in self.value or "\x00" in self.value:
+            raise ValueError(f"invalid concept id: {self.value!r}")
+        if any(part in ("", ".", "..") for part in self.value.split("/")):
+            raise ValueError(f"invalid concept id: {self.value!r}")
 
     def __str__(self) -> str:
         return self.value

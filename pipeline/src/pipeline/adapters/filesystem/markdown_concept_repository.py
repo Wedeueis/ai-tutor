@@ -10,12 +10,25 @@ from pipeline.domain.concept import Concept, ConceptId
 _RESERVED_FILENAMES = {"index.md", "log.md"}
 
 
+class PathEscapesVaultError(ValueError):
+    """A concept id resolved to a path outside the vault root."""
+
+
 class MarkdownConceptRepository:
     def __init__(self, vault_root: Path) -> None:
-        self._vault_root = vault_root
+        self._vault_root = vault_root.resolve()
 
     def _path_for(self, concept_id: ConceptId) -> Path:
-        return self._vault_root / f"{concept_id.value}.md"
+        # Defense in depth alongside ConceptId's own validation: resolve
+        # symlinks and `.`/`..` before checking containment, so a symlink
+        # planted inside the vault (or one ConceptId's checks don't catch)
+        # still can't read/write outside vault_root.
+        path = (self._vault_root / f"{concept_id.value}.md").resolve()
+        if path != self._vault_root and self._vault_root not in path.parents:
+            raise PathEscapesVaultError(
+                f"concept id {concept_id.value!r} resolves outside the vault root"
+            )
+        return path
 
     def load(self, concept_id: ConceptId) -> Concept:
         path = self._path_for(concept_id)
