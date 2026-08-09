@@ -31,4 +31,19 @@ build-backend = "uv_build"
 dev = [
     "fpdf2>=2.8.7",
     "pytest>=9.1.1",
+    "ruff>=0.16.2",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = [
+    "E501",  # line length is a soft target here, not a hard gate
+    "UP042", # `class X(str, Enum)` -> `StrEnum` is a behavior-adjacent rewrite, not a safe mechanical fix
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["pipeline"]
