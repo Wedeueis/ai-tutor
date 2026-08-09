@@ -8,6 +8,7 @@ import re
 import sqlite3
 from pathlib import Path
 
+from pipeline.adapters.sqlite._thread_local_connection import ThreadLocalSqliteConnection
 from pipeline.domain.concept import Concept
 from pipeline.domain.trust import derive_trust_tier
 
@@ -25,10 +26,11 @@ def _extract_links(body: str) -> list[str]:
 
 class SqliteMetadataRepository:
     def __init__(self, db_path: Path) -> None:
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._connection = sqlite3.connect(db_path)
-        self._connection.executescript(_SCHEMA_PATH.read_text(encoding="utf-8"))
-        self._connection.commit()
+        self._pool = ThreadLocalSqliteConnection(db_path, _SCHEMA_PATH)
+
+    @property
+    def _connection(self) -> sqlite3.Connection:
+        return self._pool.get()
 
     def upsert(self, concept: Concept) -> None:
         trust_tier = derive_trust_tier(concept.frontmatter.verified)
@@ -87,4 +89,4 @@ class SqliteMetadataRepository:
             self._connection.execute("DELETE FROM links WHERE from_id = ?", (concept_id,))
 
     def close(self) -> None:
-        self._connection.close()
+        self._pool.close()

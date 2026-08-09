@@ -7,6 +7,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+from pipeline.adapters.sqlite._thread_local_connection import ThreadLocalSqliteConnection
 from pipeline.domain.intake import IntakeItem, IntakeKind, IntakeState
 
 _SCHEMA_PATH = Path(__file__).parent / "schema.sql"
@@ -28,11 +29,11 @@ def _row_to_item(row: sqlite3.Row) -> IntakeItem:
 
 class SqliteIntakeRepository:
     def __init__(self, db_path: Path) -> None:
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._connection = sqlite3.connect(db_path)
-        self._connection.row_factory = sqlite3.Row
-        self._connection.executescript(_SCHEMA_PATH.read_text(encoding="utf-8"))
-        self._connection.commit()
+        self._pool = ThreadLocalSqliteConnection(db_path, _SCHEMA_PATH, row_factory=sqlite3.Row)
+
+    @property
+    def _connection(self) -> sqlite3.Connection:
+        return self._pool.get()
 
     def find_by_path(self, path: str) -> IntakeItem | None:
         row = self._connection.execute(
@@ -109,4 +110,4 @@ class SqliteIntakeRepository:
         return [row["concept_id"] for row in rows]
 
     def close(self) -> None:
-        self._connection.close()
+        self._pool.close()
