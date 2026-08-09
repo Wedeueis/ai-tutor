@@ -1,0 +1,30 @@
+[
+  {
+    "rubric_id": "traceable",
+    "rubric_content": {
+      "text_property": "Every claim in the body must be traceable to the raw source material — no fabricated facts, numbers, or attributions."
+    },
+    "type": "CONTENT_QUALITY"
+  },
+  {
+    "rubric_id": "not_verbatim",
+    "rubric_content": {
+      "text_property": "The body must not simply repeat the raw note verbatim; it should add structure or clarity (headings, lists, a clearer restatement)."
+    },
+    "type": "CONTENT_QUALITY"
+  },
+  {
+    "rubric_id": "accurate_summary",
+    "rubric_content": {
+      "text_property": "The title and description must accurately reflect what the body actually says."
+    },
+    "type": "CONTENT_QUALITY"
+  },
+  {
+    "rubric_id": "substantial",
+    "rubric_content": {
+      "text_property": "The body must be substantial enough to be useful on its own, not a single vague sentence."
+    },
+    "type": "CONTENT_QUALITY"
+  }
+]

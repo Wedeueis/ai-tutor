@@ -1,0 +1,26 @@
+from __future__ import annotations
+
+from typing import Protocol
+
+from pipeline.domain.intake import IntakeItem, IntakeKind, IntakeState
+
+
+class IntakeRepositoryPort(Protocol):
+    """The single source of truth for what the pipeline knows about a file (or a
+    chunk derived from one) and what state it's in."""
+
+    def find_by_path(self, path: str) -> IntakeItem | None: ...
+
+    def upsert(self, item: IntakeItem) -> None: ...
+
+    def get(self, item_id: str) -> IntakeItem | None: ...
+
+    def list_by_state(
+        self, state: IntakeState, kind: IntakeKind | None = None
+    ) -> list[IntakeItem]: ...
+
+    def list_children(self, parent_id: str) -> list[IntakeItem]: ...
+
+    def link_concept(self, item_id: str, concept_id: str) -> None: ...
+
+    def list_concepts_for(self, item_id: str) -> list[str]: ...

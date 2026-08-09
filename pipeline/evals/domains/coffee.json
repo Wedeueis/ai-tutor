@@ -1,0 +1,23 @@
+[
+  {
+    "rubric_id": "traceable",
+    "rubric_content": {
+      "text_property": "Claims must be traceable to the source raw material — no fabricated facts, ratios, temperatures, or timings."
+    },
+    "type": "CONTENT_QUALITY"
+  },
+  {
+    "rubric_id": "quantitative",
+    "rubric_content": {
+      "text_property": "Any brewing ratio, dose, yield, or timing figure must be quantitative and match what the source note actually says."
+    },
+    "type": "CONTENT_QUALITY"
+  },
+  {
+    "rubric_id": "actionable",
+    "rubric_content": {
+      "text_property": "Reject vague coffee trivia that isn't actionable brewing guidance."
+    },
+    "type": "CONTENT_QUALITY"
+  }
+]

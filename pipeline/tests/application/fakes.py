@@ -1,0 +1,256 @@
+"""Hand-written in-memory fakes for every port, used to test use cases without any
+real Ollama/Chroma/SQLite/filesystem dependency."""
+
+from __future__ import annotations
+
+from pipeline.application.ports.filesystem_scanner import ScannedFile
+from pipeline.domain.agent import (
+    CandidateMatch,
+    DisambiguationVerdict,
+    DomainClassificationVerdict,
+    DraftConcept,
+    TypeClassificationVerdict,
+)
+from pipeline.domain.computation import Receipt, Verdict
+from pipeline.domain.concept import Concept, ConceptId
+from pipeline.domain.eval import Rubric, RubricScore
+from pipeline.domain.intake import IntakeItem, IntakeKind, IntakeState
+from pipeline.domain.raw_material import RawItem
+from pipeline.domain.source_document import ParsedDocument
+
+
+class FakeConceptRepository:
+    def __init__(self) -> None:
+        self.concepts: dict[str, Concept] = {}
+
+    def load(self, concept_id: ConceptId) -> Concept:
+        return self.concepts[str(concept_id)]
+
+    def save(self, concept: Concept) -> None:
+        self.concepts[str(concept.id)] = concept
+
+    def list(self) -> list[ConceptId]:
+        return [ConceptId(cid) for cid in self.concepts]
+
+    def exists(self, concept_id: ConceptId) -> bool:
+        return str(concept_id) in self.concepts
+
+
+class FakeRawMaterialRepository:
+    def __init__(self, items: list[RawItem] | None = None) -> None:
+        self.items = list(items or [])
+        self.processed: list[str] = []
+        self.rejected: dict[str, str] = {}
+        self.concept_links: dict[str, list[str]] = {}
+
+    def list_unprocessed(self) -> list[RawItem]:
+        return [
+            item
+            for item in self.items
+            if item.id not in self.processed and item.id not in self.rejected
+        ]
+
+    def mark_processed(self, raw_id: str) -> None:
+        self.processed.append(raw_id)
+
+    def mark_rejected(self, raw_id: str, reason: str) -> None:
+        self.rejected[raw_id] = reason
+
+    def link_concept(self, raw_id: str, concept_id: str) -> None:
+        self.concept_links.setdefault(raw_id, []).append(concept_id)
+
+
+class FakeIntakeRepository:
+    def __init__(self, items: list[IntakeItem] | None = None) -> None:
+        self.items: dict[str, IntakeItem] = {item.id: item for item in (items or [])}
+        self.concept_links: dict[str, list[str]] = {}
+
+    def find_by_path(self, path: str) -> IntakeItem | None:
+        matches = [item for item in self.items.values() if item.path == path]
+        return max(matches, key=lambda item: item.discovered_at) if matches else None
+
+    def upsert(self, item: IntakeItem) -> None:
+        self.items[item.id] = item
+
+    def get(self, item_id: str) -> IntakeItem | None:
+        return self.items.get(item_id)
+
+    def list_by_state(self, state: IntakeState, kind: IntakeKind | None = None) -> list[IntakeItem]:
+        return [
+            item
+            for item in self.items.values()
+            if item.state == state and (kind is None or item.kind == kind)
+        ]
+
+    def list_children(self, parent_id: str) -> list[IntakeItem]:
+        return [item for item in self.items.values() if item.parent_id == parent_id]
+
+    def link_concept(self, item_id: str, concept_id: str) -> None:
+        self.concept_links.setdefault(item_id, [])
+        if concept_id not in self.concept_links[item_id]:
+            self.concept_links[item_id].append(concept_id)
+
+    def list_concepts_for(self, item_id: str) -> list[str]:
+        return self.concept_links.get(item_id, [])
+
+
+class FakeFileSystemScanner:
+    def __init__(
+        self, files: list[ScannedFile] | None = None, contents: dict[str, str] | None = None
+    ) -> None:
+        self.files = files or []
+        self.contents = contents or {}
+
+    def scan(self, root: str) -> list[ScannedFile]:
+        return self.files
+
+    def read_text(self, path: str) -> str:
+        return self.contents[path]
+
+
+class FakeBundleLog:
+    def __init__(self) -> None:
+        self.entries: list[str] = []
+
+    def append(self, message: str) -> None:
+        self.entries.append(message)
+
+
+class FakeExtractionSkill:
+    def __init__(self, drafts_by_raw_id: dict[str, list[DraftConcept]]) -> None:
+        self._drafts_by_raw_id = drafts_by_raw_id
+
+    def extract(self, raw: RawItem) -> list[DraftConcept]:
+        return self._drafts_by_raw_id.get(raw.id, [])
+
+
+class FakeEntityDisambiguationSkill:
+    def __init__(self, verdict: DisambiguationVerdict) -> None:
+        self._verdict = verdict
+
+    def disambiguate(self, draft, candidates) -> DisambiguationVerdict:
+        return self._verdict
+
+
+class FakeTypeClassificationSkill:
+    def __init__(self, verdict: TypeClassificationVerdict) -> None:
+        self._verdict = verdict
+
+    def classify(self, draft, known_types) -> TypeClassificationVerdict:
+        return self._verdict
+
+
+class FakeDomainClassificationSkill:
+    def __init__(self, verdict: DomainClassificationVerdict) -> None:
+        self._verdict = verdict
+
+    def classify(self, draft, candidates) -> DomainClassificationVerdict:
+        return self._verdict
+
+
+class FakeQualityEvalSkill:
+    def __init__(self, scores: list[RubricScore]) -> None:
+        self._scores = scores
+
+    def evaluate(self, draft, rubrics, raw_content) -> list[RubricScore]:
+        return self._scores
+
+
+class FakeEvalRubricsRepository:
+    def __init__(
+        self,
+        rubrics_by_domain: dict[str, list[Rubric]] | None = None,
+        base_rubrics: list[Rubric] | None = None,
+    ) -> None:
+        self._rubrics_by_domain = rubrics_by_domain or {}
+        self._base_rubrics = base_rubrics or []
+
+    def load_for_domain(self, domain_id: str | None) -> list[Rubric]:
+        if domain_id is not None and domain_id in self._rubrics_by_domain:
+            return self._rubrics_by_domain[domain_id]
+        return self._base_rubrics
+
+
+class FakeEmbedding:
+    def embed(self, text: str) -> list[float]:
+        return [float(len(text))]
+
+
+class FakeVectorSearch:
+    def __init__(self, candidates: list[CandidateMatch] | None = None) -> None:
+        self.candidates = candidates or []
+        self.upserted: dict[str, tuple[list[float], dict]] = {}
+
+    def upsert(self, concept_id: str, vector: list[float], metadata: dict) -> None:
+        self.upserted[concept_id] = (vector, metadata)
+
+    def query(
+        self, vector: list[float], k: int = 5, where: dict | None = None
+    ) -> list[CandidateMatch]:
+        return self.candidates[:k]
+
+    def delete(self, concept_id: str) -> None:
+        self.upserted.pop(concept_id, None)
+
+
+class FakeMetadataRepository:
+    def __init__(
+        self,
+        known_types: list[str] | None = None,
+        domain_ids: list[str] | None = None,
+    ) -> None:
+        self.known_types = known_types or []
+        self.domain_ids = domain_ids or []
+        self.upserted: dict[str, Concept] = {}
+
+    def upsert(self, concept: Concept) -> None:
+        self.upserted[str(concept.id)] = concept
+
+    def list_distinct_types(self, domain: str | None = None) -> list[str]:
+        return self.known_types
+
+    def find_ids_by_type(self, concept_type: str) -> list[str]:
+        return self.domain_ids if concept_type == "Domain" else []
+
+    def delete(self, concept_id: str) -> None:
+        self.upserted.pop(concept_id, None)
+
+
+class FakeSchemaRegistry:
+    def __init__(self, schemas: dict[str, dict] | None = None) -> None:
+        self._schemas = schemas or {}
+
+    def get_schema(self, concept_type: str) -> dict | None:
+        return self._schemas.get(concept_type)
+
+
+class FakeExecutor:
+    def __init__(self, receipt: Receipt) -> None:
+        self._receipt = receipt
+
+    def run(self, computation: str, parameters: dict) -> Receipt:
+        return self._receipt
+
+
+class FakeAttester:
+    def __init__(self, verdict: Verdict) -> None:
+        self._verdict = verdict
+
+    def verify(self, receipt: Receipt, contract: dict) -> Verdict:
+        return self._verdict
+
+
+class FakeDocumentParsing:
+    def __init__(self, parsed_by_path: dict[str, ParsedDocument]) -> None:
+        self._parsed_by_path = parsed_by_path
+
+    def parse(self, path: str) -> ParsedDocument:
+        return self._parsed_by_path[path]
+
+
+class FakeImageCaptioning:
+    def __init__(self, captions_by_anchor: dict[str, str] | None = None) -> None:
+        self._captions_by_anchor = captions_by_anchor or {}
+
+    def caption(self, image) -> str:
+        return self._captions_by_anchor.get(image.anchor, "a captioned image")

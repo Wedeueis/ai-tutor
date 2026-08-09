@@ -1,0 +1,142 @@
+"""Orchestrates every LLM-backed skill over one raw item: extract, classify
+domain, find domain-scoped candidates, disambiguate, classify type, evaluate
+quality. Returns create/merge/reject decisions — it does not write anything
+itself (see ingest_raw_material.py)."""
+
+from __future__ import annotations
+
+from dataclasses import replace
+
+from pipeline.application.ports.concept_repository import ConceptRepositoryPort
+from pipeline.application.ports.embedding import EmbeddingPort
+from pipeline.application.ports.eval_rubrics_repository import EvalRubricsRepositoryPort
+from pipeline.application.ports.metadata_repository import MetadataRepositoryPort
+from pipeline.application.ports.skills.domain_classification import (
+    DomainClassificationSkillPort,
+)
+from pipeline.application.ports.skills.entity_disambiguation import (
+    EntityDisambiguationSkillPort,
+)
+from pipeline.application.ports.skills.extraction import ExtractionSkillPort
+from pipeline.application.ports.skills.quality_eval import QualityEvalSkillPort
+from pipeline.application.ports.skills.type_classification import (
+    TypeClassificationSkillPort,
+)
+from pipeline.application.ports.vector_search import VectorSearchPort
+from pipeline.domain.agent import (
+    AgentResult,
+    CreateDecision,
+    DomainCandidate,
+    MergeDecision,
+    RejectDecision,
+)
+from pipeline.domain.concept import ConceptId
+from pipeline.domain.eval import DEFAULT_EVAL_THRESHOLD, aggregate_scores
+from pipeline.domain.raw_material import RawItem
+
+DEFAULT_DISAMBIGUATION_CONFIDENCE_THRESHOLD = 0.75
+DOMAIN_TYPE = "Domain"
+
+
+class KnowledgeAgent:
+    def __init__(
+        self,
+        extraction: ExtractionSkillPort,
+        embedding: EmbeddingPort,
+        vector_search: VectorSearchPort,
+        disambiguation: EntityDisambiguationSkillPort,
+        type_classification: TypeClassificationSkillPort,
+        domain_classification: DomainClassificationSkillPort,
+        quality_eval: QualityEvalSkillPort,
+        eval_rubrics_repository: EvalRubricsRepositoryPort,
+        metadata_repository: MetadataRepositoryPort,
+        concept_repository: ConceptRepositoryPort,
+        disambiguation_confidence_threshold: float = DEFAULT_DISAMBIGUATION_CONFIDENCE_THRESHOLD,
+        eval_threshold: float = DEFAULT_EVAL_THRESHOLD,
+    ) -> None:
+        self._extraction = extraction
+        self._embedding = embedding
+        self._vector_search = vector_search
+        self._disambiguation = disambiguation
+        self._type_classification = type_classification
+        self._domain_classification = domain_classification
+        self._quality_eval = quality_eval
+        self._eval_rubrics_repository = eval_rubrics_repository
+        self._metadata_repository = metadata_repository
+        self._concept_repository = concept_repository
+        self._threshold = disambiguation_confidence_threshold
+        self._eval_threshold = eval_threshold
+
+    def run(self, raw: RawItem) -> AgentResult:
+        drafts = self._extraction.extract(raw)
+
+        decisions: list[CreateDecision | MergeDecision | RejectDecision] = []
+        for draft in drafts:
+            domain = self._classify_domain(draft)
+
+            vector = self._embedding.embed(draft.body)
+            where = {"domain": str(domain)} if domain is not None else None
+            candidates = self._vector_search.query(vector, k=5, where=where)
+
+            merged_into: ConceptId | None = None
+            if candidates:
+                verdict = self._disambiguation.disambiguate(draft, candidates)
+                if verdict.same_as is not None and verdict.confidence >= self._threshold:
+                    merged_into = verdict.same_as
+
+            rubrics = self._eval_rubrics_repository.load_for_domain(
+                str(domain) if domain is not None else None
+            )
+            scores = self._quality_eval.evaluate(draft, rubrics, raw.content)
+            eval_result = aggregate_scores(scores, threshold=self._eval_threshold)
+
+            if merged_into is not None:
+                if eval_result.passed:
+                    decisions.append(MergeDecision(into=merged_into, addition=draft.body))
+                else:
+                    rationale = "; ".join(
+                        s.rationale for s in eval_result.scores if s.rationale
+                    ) or "quality eval below threshold"
+                    decisions.append(RejectDecision(source_raw_id=raw.id, rationale=rationale))
+                continue
+
+            known_types = self._metadata_repository.list_distinct_types(
+                domain=str(domain) if domain is not None else None
+            )
+            type_verdict = self._type_classification.classify(draft, known_types)
+
+            # Quality-eval failure never blocks creation — it only withholds
+            # domain acceptance, leaving the concept as an unvalidated,
+            # domain-less node a future orphan-detection pass can find.
+            final_domain = str(domain) if domain is not None and eval_result.passed else None
+            resolved_draft = replace(
+                draft,
+                frontmatter=replace(
+                    draft.frontmatter,
+                    type=type_verdict.resolved_type,
+                    domain=final_domain,
+                    eval=eval_result,
+                ),
+            )
+            decisions.append(CreateDecision(concept=resolved_draft))
+
+        return AgentResult(decisions=decisions)
+
+    def _classify_domain(self, draft) -> ConceptId | None:
+        domain_ids = self._metadata_repository.find_ids_by_type(DOMAIN_TYPE)
+        if not domain_ids:
+            return None
+
+        candidates = []
+        for domain_id in domain_ids:
+            concept = self._concept_repository.load(ConceptId(domain_id))
+            candidates.append(
+                DomainCandidate(
+                    concept_id=concept.id,
+                    title=concept.frontmatter.title,
+                    description=concept.frontmatter.description,
+                )
+            )
+
+        verdict = self._domain_classification.classify(draft, candidates)
+        return verdict.domain

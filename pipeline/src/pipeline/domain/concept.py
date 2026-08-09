@@ -1,0 +1,125 @@
+"""Core OKF concept model (WIKI_SPEC.md §2, §4). Pure domain — no I/O."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import datetime
+
+from pipeline.domain.eval import EvalResult
+
+
+@dataclass(frozen=True)
+class ConceptId:
+    """A concept's path within the bundle, `.md` suffix removed (WIKI_SPEC.md §2)."""
+
+    value: str
+
+    def __post_init__(self) -> None:
+        if not self.value or self.value.endswith(".md"):
+            raise ValueError(f"invalid concept id: {self.value!r}")
+
+    def __str__(self) -> str:
+        return self.value
+
+
+@dataclass(frozen=True)
+class Actor:
+    """`<producer>/<version>` for agents, `human:<id>` for people, `process:<id>` for
+    automated processes (WIKI_SPEC.md §7)."""
+
+    value: str
+
+    @property
+    def is_human(self) -> bool:
+        return self.value.startswith("human:")
+
+    def __str__(self) -> str:
+        return self.value
+
+
+@dataclass(frozen=True)
+class Source:
+    """One entry in a concept's `sources` frontmatter (WIKI_SPEC.md §5.1)."""
+
+    resource: str
+    id: str | None = None
+    title: str | None = None
+    author: str | None = None
+    usage_count: int | None = None
+    last_modified: str | None = None
+
+
+@dataclass(frozen=True)
+class VerificationEvent:
+    """One entry in a concept's `verified` frontmatter (WIKI_SPEC.md §5.2)."""
+
+    by: Actor
+    at: datetime
+
+
+@dataclass(frozen=True)
+class Generated:
+    """A concept's `generated` frontmatter: who/what produced it, and when (§5.2)."""
+
+    by: Actor
+    at: datetime | None = None
+
+
+@dataclass
+class Frontmatter:
+    """A concept's YAML frontmatter block (WIKI_SPEC.md §4.1). `type` is the only
+    required field; everything else is optional. Unknown keys are preserved in
+    `extra` rather than dropped (§4.1: consumers MUST NOT reject unrecognized keys)."""
+
+    type: str
+    title: str | None = None
+    description: str | None = None
+    resource: str | None = None
+    tags: list[str] = field(default_factory=list)
+    sources: list[Source] = field(default_factory=list)
+    generated: Generated | None = None
+    verified: list[VerificationEvent] = field(default_factory=list)
+    status: str | None = None  # draft | stable | deprecated; absent => stable (§5.4)
+    stale_after: str | None = None  # ISO date (§5.5)
+    domain: str | None = None  # id of the owning `type: Domain` concept, if triaged
+    eval: EvalResult | None = None  # quality-eval audit trail (pipeline/evals/, not a vault concept)
+    extra: dict = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        """A plain, JSON-Schema-validatable dict of the always-present fields plus
+        any producer-defined extras. Keeps schema validation decoupled from the
+        dataclass shape."""
+        data: dict = {"type": self.type, **self.extra}
+        if self.title is not None:
+            data["title"] = self.title
+        if self.description is not None:
+            data["description"] = self.description
+        if self.resource is not None:
+            data["resource"] = self.resource
+        if self.tags:
+            data["tags"] = list(self.tags)
+        if self.status is not None:
+            data["status"] = self.status
+        if self.stale_after is not None:
+            data["stale_after"] = self.stale_after
+        if self.domain is not None:
+            data["domain"] = self.domain
+        if self.eval is not None:
+            data["eval"] = {
+                "passed": self.eval.passed,
+                "average_score": self.eval.average_score,
+                "scores": [
+                    {"rubric_id": s.rubric_id, "score": s.score, "rationale": s.rationale}
+                    for s in self.eval.scores
+                ],
+            }
+        return data
+
+
+@dataclass
+class Concept:
+    """One OKF concept: a markdown document with frontmatter + body (§2, §4)."""
+
+    id: ConceptId
+    frontmatter: Frontmatter
+    body: str
