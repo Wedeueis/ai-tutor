@@ -46,6 +46,7 @@ from pipeline.application.use_cases.validate_concept import ValidateConcept
 from pipeline.config import Settings
 from pipeline.domain.concept import Concept, ConceptId, Frontmatter
 from pipeline.domain.intake import IntakeKind, IntakeState
+from pipeline.logging_config import configure_logging
 
 app = typer.Typer(help="Local-only ingestion + attester pipeline for the OKF vault.")
 
@@ -68,7 +69,11 @@ class Container:
         )
         self.bundle_log = MarkdownBundleLog(settings.vault_path / "log.md")
 
-        ollama = OllamaClient(settings.ollama_host)
+        ollama = OllamaClient(
+            settings.ollama_host,
+            timeout=settings.ollama_timeout_seconds,
+            max_predict_tokens=settings.ollama_max_predict_tokens,
+        )
         self.embedding = OllamaEmbedding(ollama, settings.ollama_embed_model)
         self.extraction_skill = OllamaExtractionSkill(ollama, settings.ollama_chat_model)
         self.disambiguation_skill = OllamaEntityDisambiguationSkill(
@@ -106,6 +111,8 @@ class Container:
             eval_rubrics_repository=self.eval_rubrics_repository,
             metadata_repository=self.metadata_repository,
             concept_repository=self.concept_repository,
+            disambiguation_confidence_threshold=settings.disambiguation_confidence_threshold,
+            eval_threshold=settings.eval_threshold,
         )
         self.ingest_raw_material = IngestRawMaterial(
             raw_material_repository=self.raw_material_repository,
@@ -119,12 +126,17 @@ class Container:
         self.search_concepts = SearchConcepts(self.embedding, self.vector_search)
         self.scan_intake = ScanIntake(self.scanner, self.intake_repository)
         self.parse_source_documents = ParseSourceDocuments(
-            self.intake_repository, self.document_parser, self.image_captioning_skill
+            self.intake_repository,
+            self.document_parser,
+            self.image_captioning_skill,
+            max_chunk_chars=settings.chunk_max_chars,
         )
 
 
 def _container() -> Container:
-    return Container(Settings.from_env())
+    settings = Settings.from_env()
+    configure_logging(settings.log_level)
+    return Container(settings)
 
 
 @app.command()
@@ -286,14 +298,22 @@ def search(query: str, k: int = 5) -> None:
 
 @app.command(name="mcp-serve")
 def mcp_serve(
-    host: str = typer.Option("127.0.0.1", "--host"),
-    port: int = typer.Option(8000, "--port"),
-    stateless: bool = typer.Option(True, "--stateless/--stateful"),
+    host: str = typer.Option(None, "--host", help="Defaults to $MCP_HOST (127.0.0.1)."),
+    port: int = typer.Option(None, "--port", help="Defaults to $MCP_PORT (8000)."),
+    stateless: bool = typer.Option(
+        None, "--stateless/--stateful", help="Defaults to $MCP_STATELESS (stateless)."
+    ),
 ) -> None:
     """Serve the vault to MCP clients (e.g. Claude) over Streamable HTTP."""
     from pipeline.mcp.server import run as run_mcp_server
 
-    run_mcp_server(host=host, port=port, stateless=stateless)
+    settings = Settings.from_env()
+    configure_logging(settings.log_level)
+    run_mcp_server(
+        host=host if host is not None else settings.mcp_host,
+        port=port if port is not None else settings.mcp_port,
+        stateless=stateless if stateless is not None else settings.mcp_stateless,
+    )
 
 
 if __name__ == "__main__":
