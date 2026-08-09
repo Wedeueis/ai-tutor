@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# pipeline/ — local dev environment and derived, rebuildable state
+pipeline/.venv/
+pipeline/.data/
+pipeline/.pytest_cache/
+pipeline/.ruff_cache/
+pipeline/site/
+pipeline/.env
+
+# Obsidian's local app/workspace state (window layout, plugin cache) —
+# machine-specific, not vault content.
+vault/.obsidian/
+
+# Claude Code local runtime state
+.claude/
+
+# Editors / OS
+.DS_Store
+*.swp
