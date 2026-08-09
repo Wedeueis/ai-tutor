@@ -73,6 +73,8 @@ class Container:
             settings.ollama_host,
             timeout=settings.ollama_timeout_seconds,
             max_predict_tokens=settings.ollama_max_predict_tokens,
+            max_retries=settings.ollama_max_retries,
+            retry_backoff_seconds=settings.ollama_retry_backoff_seconds,
         )
         self.embedding = OllamaEmbedding(ollama, settings.ollama_embed_model)
         self.extraction_skill = OllamaExtractionSkill(ollama, settings.ollama_chat_model)
