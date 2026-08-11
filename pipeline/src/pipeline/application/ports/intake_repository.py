@@ -24,3 +24,13 @@ class IntakeRepositoryPort(Protocol):
     def link_concept(self, item_id: str, concept_id: str) -> None: ...
 
     def list_concepts_for(self, item_id: str) -> list[str]: ...
+
+    def delete(self, item_id: str) -> None: ...
+
+    def list_stale_duplicates(self) -> list[IntakeItem]:
+        """Items superseded at their own path by a later hash (content changed
+        since they were tracked) that never got past `discovered`/`error` — i.e.
+        nothing was ever derived from them. `ScanIntake` already prevents new
+        ones from accumulating; this is for cleaning up ones that predate that,
+        or that slipped through some other way."""
+        ...

@@ -109,5 +109,27 @@ class SqliteIntakeRepository:
         ).fetchall()
         return [row["concept_id"] for row in rows]
 
+    def delete(self, item_id: str) -> None:
+        with self._connection:
+            self._connection.execute("DELETE FROM intake_items WHERE id = ?", (item_id,))
+            self._connection.execute(
+                "DELETE FROM intake_item_concepts WHERE intake_item_id = ?", (item_id,)
+            )
+
+    def list_stale_duplicates(self) -> list[IntakeItem]:
+        rows = self._connection.execute(
+            """
+            SELECT * FROM intake_items t1
+            WHERE t1.path IS NOT NULL
+              AND t1.state IN ('discovered', 'error')
+              AND EXISTS (
+                  SELECT 1 FROM intake_items t2
+                  WHERE t2.path = t1.path AND t2.discovered_at > t1.discovered_at
+              )
+            ORDER BY t1.discovered_at
+            """
+        ).fetchall()
+        return [_row_to_item(row) for row in rows]
+
     def close(self) -> None:
         self._pool.close()

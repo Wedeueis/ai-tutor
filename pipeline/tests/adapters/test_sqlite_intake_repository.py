@@ -76,6 +76,42 @@ def test_list_children_by_parent(tmp_path):
     repo.close()
 
 
+def test_delete_removes_item_and_its_concept_links(tmp_path):
+    repo = SqliteIntakeRepository(tmp_path / "intake.db")
+    repo.upsert(_item())
+    repo.link_concept("hash1", "espresso-ratio")
+
+    repo.delete("hash1")
+
+    assert repo.get("hash1") is None
+    assert repo.list_concepts_for("hash1") == []
+    repo.close()
+
+
+def test_list_stale_duplicates_finds_superseded_never_processed_items(tmp_path):
+    repo = SqliteIntakeRepository(tmp_path / "intake.db")
+    now = datetime.now(UTC)
+    later = datetime.now(UTC).replace(microsecond=999999)
+    repo.upsert(_item(id="old", state=IntakeState.DISCOVERED, discovered_at=now, updated_at=now))
+    repo.upsert(_item(id="new", discovered_at=later, updated_at=later))
+
+    stale = repo.list_stale_duplicates()
+
+    assert [item.id for item in stale] == ["old"]
+    repo.close()
+
+
+def test_list_stale_duplicates_excludes_already_processed_items(tmp_path):
+    repo = SqliteIntakeRepository(tmp_path / "intake.db")
+    now = datetime.now(UTC)
+    later = datetime.now(UTC).replace(microsecond=999999)
+    repo.upsert(_item(id="old", state=IntakeState.INGESTED, discovered_at=now, updated_at=now))
+    repo.upsert(_item(id="new", discovered_at=later, updated_at=later))
+
+    assert repo.list_stale_duplicates() == []
+    repo.close()
+
+
 def test_link_and_list_concepts(tmp_path):
     repo = SqliteIntakeRepository(tmp_path / "intake.db")
     repo.upsert(_item())
