@@ -133,3 +133,26 @@ class Concept:
     id: ConceptId
     frontmatter: Frontmatter
     body: str
+
+
+NON_CONTENT_TYPES = {"MOC", "Domain", "Source Document"}
+"""Structural/navigation types (curated link hubs, domain scaffolding,
+per-source reference stubs) that aren't ingestible content — excluded from
+semantic search/candidate matching (IndexConcept), entity-disambiguation, and
+quality auditing (AuditConceptQuality). Still tracked in the metadata store,
+just not treated as "knowledge" a standalone-quality judgment would make
+sense against."""
+
+
+@dataclass(frozen=True)
+class LinkGraph:
+    """Outgoing and incoming §6 links for one concept — how clusters of
+    related concepts become walkable, independent of tags. Both directions
+    are derived from the `links` table's raw, regex-extracted markdown link
+    targets (see `MetadataRepositoryPort.upsert`/`find_links`), so entries
+    are whatever string form the link used (e.g. `/qubits.md`), not
+    necessarily a normalized `ConceptId`."""
+
+    concept_id: str
+    outgoing: list[str] = field(default_factory=list)
+    incoming: list[str] = field(default_factory=list)
