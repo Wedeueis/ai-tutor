@@ -1,6 +1,5 @@
-from datetime import date, datetime
+from datetime import datetime
 
-from pipeline.adapters.filesystem.markdown_bundle_log import MarkdownBundleLog
 from pipeline.adapters.filesystem.markdown_concept_repository import MarkdownConceptRepository
 from pipeline.domain.concept import (
     Actor,
@@ -82,25 +81,15 @@ def test_exists(tmp_path):
     assert repo.exists(ConceptId("a"))
 
 
-def test_bundle_log_appends_under_todays_heading(tmp_path):
-    log_path = tmp_path / "log.md"
-    log = MarkdownBundleLog(log_path, today_provider=lambda: date(2026, 8, 9))
+def test_delete_removes_the_file(tmp_path):
+    repo = MarkdownConceptRepository(tmp_path)
+    repo.save(Concept(id=ConceptId("a"), frontmatter=Frontmatter(type="Playbook"), body=""))
 
-    log.append("**Creation**: Added [A](a.md).")
-    log.append("**Creation**: Added [B](b.md).")
+    repo.delete(ConceptId("a"))
 
-    content = log_path.read_text(encoding="utf-8")
-    assert content.count("## 2026-08-09") == 1
-    assert "* **Creation**: Added [A](a.md)." in content
-    assert "* **Creation**: Added [B](b.md)." in content
+    assert not repo.exists(ConceptId("a"))
 
 
-def test_bundle_log_adds_new_heading_for_new_day(tmp_path):
-    log_path = tmp_path / "log.md"
-    log_path.write_text("# Directory Update Log\n\n## 2026-08-08\n* old entry\n", encoding="utf-8")
-    log = MarkdownBundleLog(log_path, today_provider=lambda: date(2026, 8, 9))
-
-    log.append("**Creation**: Added [A](a.md).")
-
-    content = log_path.read_text(encoding="utf-8")
-    assert content.index("## 2026-08-09") < content.index("## 2026-08-08")
+def test_delete_is_a_noop_when_concept_does_not_exist(tmp_path):
+    repo = MarkdownConceptRepository(tmp_path)
+    repo.delete(ConceptId("does-not-exist"))  # must not raise

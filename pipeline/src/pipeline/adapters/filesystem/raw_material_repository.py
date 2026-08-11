@@ -28,7 +28,7 @@ class FilesystemRawMaterialRepository:
                 content = (
                     item.content if item.content is not None else self._scanner.read_text(item.path)
                 )
-                raw_items.append(RawItem(id=item.id, content=content))
+                raw_items.append(RawItem(id=item.id, content=content, source_id=item.parent_id))
         return raw_items
 
     def mark_processed(self, raw_id: str) -> None:
@@ -42,6 +42,10 @@ class FilesystemRawMaterialRepository:
 
     def link_concept(self, raw_id: str, concept_id: str) -> None:
         self._intake_repository.link_concept(raw_id, concept_id)
+
+    def find_source_concept(self, source_id: str) -> str | None:
+        concepts = self._intake_repository.list_concepts_for(source_id)
+        return concepts[0] if concepts else None
 
     def _transition(self, raw_id: str, state: IntakeState, error_message: str | None = None) -> None:
         item = self._intake_repository.get(raw_id)

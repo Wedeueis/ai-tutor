@@ -93,3 +93,22 @@ def test_lists_db_only_chunk_content_without_touching_filesystem(tmp_path):
 
     assert len(items) == 1
     assert items[0].content == "chunk text from a parsed PDF"
+    assert items[0].source_id == "source-1"
+
+
+def test_raw_note_has_no_source_id(tmp_path):
+    raw_dir, intake_repository, scan, repo = _setup(tmp_path)
+    (raw_dir / "note1.md").write_text("content", encoding="utf-8")
+    scan.run(str(raw_dir))
+
+    assert repo.list_unprocessed()[0].source_id is None
+
+
+def test_find_source_concept_resolves_via_intake_link_concept(tmp_path):
+    raw_dir, intake_repository, scan, repo = _setup(tmp_path)
+
+    assert repo.find_source_concept("source-1") is None
+
+    intake_repository.link_concept("source-1", "references/some-paper")
+
+    assert repo.find_source_concept("source-1") == "references/some-paper"

@@ -51,6 +51,36 @@ def test_changed_content_registers_a_new_item_at_same_path():
     assert intake_repository.get("h1-old").state is IntakeState.INGESTED
 
 
+def test_changed_content_deletes_stale_never_processed_item_at_same_path():
+    now = datetime.now(UTC)
+    existing = IntakeItem(
+        id="h1-old", kind=IntakeKind.RAW_NOTE, state=IntakeState.DISCOVERED,
+        path="raw/note.md", discovered_at=now, updated_at=now,
+    )
+    scanner = FakeFileSystemScanner(files=[ScannedFile(path="raw/note.md", content_hash="h1-new")])
+    intake_repository = FakeIntakeRepository(items=[existing])
+
+    new_items = ScanIntake(scanner, intake_repository).run("raw")
+
+    assert len(new_items) == 1
+    assert new_items[0].id == "h1-new"
+    assert intake_repository.get("h1-old") is None
+
+
+def test_changed_content_deletes_stale_errored_item_at_same_path():
+    now = datetime.now(UTC)
+    existing = IntakeItem(
+        id="h1-old", kind=IntakeKind.RAW_NOTE, state=IntakeState.ERROR,
+        path="raw/note.md", discovered_at=now, updated_at=now, error_message="boom",
+    )
+    scanner = FakeFileSystemScanner(files=[ScannedFile(path="raw/note.md", content_hash="h1-new")])
+    intake_repository = FakeIntakeRepository(items=[existing])
+
+    ScanIntake(scanner, intake_repository).run("raw")
+
+    assert intake_repository.get("h1-old") is None
+
+
 def test_unrecognized_extension_is_skipped():
     scanner = FakeFileSystemScanner(files=[ScannedFile(path="raw/archive.zip", content_hash="h1")])
     intake_repository = FakeIntakeRepository()

@@ -24,3 +24,10 @@ class RawMaterialRepositoryPort(Protocol):
         ...
 
     def link_concept(self, raw_id: str, concept_id: str) -> None: ...
+
+    def find_source_concept(self, source_id: str) -> str | None:
+        """The reference-hub concept id representing the source document
+        `source_id` (a chunk's `RawItem.source_id`), if one has been created
+        for it yet — see ParseSourceDocuments. `None` for raw notes (which
+        have no source document) or a source not yet parsed into a hub."""
+        ...

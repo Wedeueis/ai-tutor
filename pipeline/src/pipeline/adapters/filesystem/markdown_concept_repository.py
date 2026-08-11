@@ -54,3 +54,6 @@ class MarkdownConceptRepository:
 
     def exists(self, concept_id: ConceptId) -> bool:
         return self._path_for(concept_id).exists()
+
+    def delete(self, concept_id: ConceptId) -> None:
+        self._path_for(concept_id).unlink(missing_ok=True)
