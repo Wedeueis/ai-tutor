@@ -20,3 +20,4 @@ accumulate enough concepts to warrant one.
 # Areas
 
 * [Coffee](domains/coffee.md) - coffee brewing, ratios, and equipment.
+* [Machine Learning](domains/machine-learning.md) - machine learning, NLP, and knowledge-graph research notes.
