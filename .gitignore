@@ -10,6 +10,10 @@ pipeline/.ruff_cache/
 pipeline/site/
 pipeline/.env
 
+# agent/ — local dev environment
+agent/.venv/
+agent/.env
+
 # Obsidian's local app/workspace state (window layout, plugin cache) —
 # machine-specific, not vault content.
 vault/.obsidian/

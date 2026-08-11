@@ -33,16 +33,19 @@ When modifying the spec itself, preserve its versioning discipline (§12): minor
 `vault/` is the OKF bundle: an Obsidian vault whose contents are also a conformant OKF bundle. Structure:
 
 - `vault/index.md` — the bundle-root mechanical directory listing (§8), carrying `okf_version: "0.2"`.
-- `vault/MOC.md` — the curated, thematic entry point (`type: MOC`), separate from `index.md` on purpose: `index.md` lists what physically exists in a directory; a MOC hand-curates links across the bundle by theme, independent of folder placement.
-- `vault/log.md` — bundle-root update history (§9).
-- `vault/references/` — external material, run instructions, or code that concepts cite via `sources[].resource`, `executor.resource`, or `attester.resource` (§6.3). Has its own `index.md`.
+- `vault/Home.md` — the curated, thematic entry point (`type: MOC`), separate from `index.md` on purpose: `index.md` lists what physically exists in a directory; a MOC hand-curates links across the bundle by theme, independent of folder placement. Named `Home.md` for its role, not `MOC.md` for its type — the same way future sub-MOCs get named after their theme.
+- `vault/references/` — external material, run instructions, or code that concepts cite via `sources[].resource`, `executor.resource`, or `attester.resource` (§6.3). Has its own `index.md`. No longer purely manual: the first time `pipeline` parses a source document (PDF/PPTX/etc. dropped in `vault/raw/`), it auto-creates a `references/<slug>.md` stub (`type: Source Document`) representing that document, and every concept later extracted from its chunks gets a `sources[]` entry pointing back at it — see `pipeline/docs/architecture/data-flow.md`'s `ParseSourceDocuments`/`IngestRawMaterial` sections.
 - `vault/raw/` — **not** part of the OKF bundle. A Karpathy-style capture inbox for unprocessed material (chat dumps, clippings, notes) awaiting distillation into real concepts. Files here carry no frontmatter and are never linked to from finished concepts. This is exactly what `pipeline/` watches and distills — see `pipeline/docs/architecture/data-flow.md` for the full scan → parse → ingest → index trace.
+
+This bundle deliberately does not have a `log.md`: `log.md` (§9) is optional ("MAY appear"), and the pipeline's ingest audit trail (create/merge/reject decisions) is pipeline governance state, not vault knowledge — it lives in the pipeline's SQLite store (`bundle_log` table) instead, queryable via `pipeline log`, the `okf://log` MCP resource, or `pipeline/docs/architecture/ports-and-adapters.md`'s `BundleLogPort`.
+
+`index.md` files are never concepts and are never graph participants: they carry no `type` (no frontmatter at all, besides the bundle-root's `okf_version`), `MarkdownConceptRepository.list()` skips them, and they never get embedded or appear in the pipeline's `links`/`concepts` SQLite tables. They exist purely for progressive disclosure (§8) — a mechanical, per-directory table of contents linking *out* to concepts, not something concepts should link back to as a "related concept."
 
 No topical folders (work/health/projects/...) are pre-created — the spec deliberately leaves directory structure to the producer (§3), so folders get added organically as concepts accumulate, not designed upfront.
 
 ### MOCs and MOCs of MOCs
 
-`type: MOC` is a producer-defined concept type (not part of the OKF spec itself) for Maps of Content: a concept whose body is a curated set of links on a theme, cutting across the directory hierarchy rather than following it. MOCs can link to other MOCs ("MOCs of MOCs") to build a navigable hierarchy that lives entirely in the link graph (§6), orthogonal to the physical folder tree. Do not add `type: MOC` (or any frontmatter beyond the root's `okf_version`) to `index.md` files — that would repurpose a reserved filename as a concept document, which §3.1/§8 rule out; keep the two mechanisms separate (`index.md` = mechanical listing, `MOC.md` = curated hub).
+`type: MOC` is a producer-defined concept type (not part of the OKF spec itself) for Maps of Content: a concept whose body is a curated set of links on a theme, cutting across the directory hierarchy rather than following it. MOCs can link to other MOCs ("MOCs of MOCs") to build a navigable hierarchy that lives entirely in the link graph (§6), orthogonal to the physical folder tree. Do not add `type: MOC` (or any frontmatter beyond the root's `okf_version`) to `index.md` files — that would repurpose a reserved filename as a concept document, which §3.1/§8 rule out; keep the two mechanisms separate (`index.md` = mechanical listing, `Home.md` = curated hub).
 
 ### Versioning convention
 
@@ -50,7 +53,7 @@ Don't invent a separate version/timestamp field. Use what the spec already provi
 
 - `generated: { by, at }` on a concept records its last meaningful content change — this is the timestamp (§5.2), and it deliberately supersedes the old v0.1 bare `timestamp` field (§13.1).
 - `verified: [{ by, at }]` separately records confirmation events, independent of `generated.at` (content can change without re-confirmation, and vice versa).
-- Full version history comes from git (commit log) — the spec recommends git as the bundle's distribution form specifically because it provides history, attribution, and diffs (§3). `log.md` (§9) is a curated, human-readable summary layer on top of that history, not a replacement for it.
+- Full version history comes from git (commit log) — the spec recommends git as the bundle's distribution form specifically because it provides history, attribution, and diffs (§3). `log.md` (§9) would normally be a curated, human-readable summary layer on top of that history; this bundle keeps that layer in the pipeline's SQLite audit trail instead (see "The vault" above).
 
 ## Conformance rules to respect when generating bundle content
 
@@ -60,3 +63,7 @@ A bundle is conformant if every non-reserved `.md` file has parseable YAML front
 - Don't reject or "fix" unknown `type` values or unknown frontmatter keys in existing content; the format is intentionally permissive.
 - Use bundle-relative links (`/path/to/concept.md`) over relative ones where practical, since they survive the concept being moved within its subdirectory.
 - For per-claim attribution, use markdown footnotes keyed to `sources[].id`, not a body citations list (the `# Citations` heading is a deprecated v0.1 pattern, §13.1).
+
+## Working with git history
+
+Never do a heavy rewrite of git history — reconstructing intermediate commits, rebasing, amending already-shared commits — without asking first, even when it looks like the cleanest way to fix something. Ask before, not after.
