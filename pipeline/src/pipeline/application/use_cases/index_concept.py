@@ -3,14 +3,7 @@ from __future__ import annotations
 from pipeline.application.ports.embedding import EmbeddingPort
 from pipeline.application.ports.metadata_repository import MetadataRepositoryPort
 from pipeline.application.ports.vector_search import VectorSearchPort
-from pipeline.domain.concept import Concept
-
-# Structural/navigation types (curated link hubs, domain scaffolding) aren't
-# ingestible content — they must never surface as an entity-disambiguation
-# candidate a draft could get merged into. Still tracked in the metadata store
-# (domain classification needs `find_ids_by_type("Domain")`), just excluded
-# from semantic search/candidate matching.
-_NON_CONTENT_TYPES = {"MOC", "Domain"}
+from pipeline.domain.concept import NON_CONTENT_TYPES, Concept
 
 
 class IndexConcept:
@@ -28,7 +21,7 @@ class IndexConcept:
         self._metadata_repository = metadata_repository
 
     def run(self, concept: Concept) -> None:
-        if concept.frontmatter.type not in _NON_CONTENT_TYPES:
+        if concept.frontmatter.type not in NON_CONTENT_TYPES:
             vector = self._embedding.embed(concept.body)
             metadata = {"type": concept.frontmatter.type}
             if concept.frontmatter.domain is not None:
