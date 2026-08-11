@@ -6,13 +6,16 @@ from __future__ import annotations
 from pipeline.application.ports.filesystem_scanner import ScannedFile
 from pipeline.domain.agent import (
     CandidateMatch,
+    CategoryClassificationVerdict,
     DisambiguationVerdict,
     DomainClassificationVerdict,
     DraftConcept,
+    QualityAuditVerdict,
+    RelatednessVerdict,
     TypeClassificationVerdict,
 )
 from pipeline.domain.computation import Receipt, Verdict
-from pipeline.domain.concept import Concept, ConceptId
+from pipeline.domain.concept import Concept, ConceptId, LinkGraph
 from pipeline.domain.eval import Rubric, RubricScore
 from pipeline.domain.intake import IntakeItem, IntakeKind, IntakeState
 from pipeline.domain.raw_material import RawItem
@@ -35,14 +38,22 @@ class FakeConceptRepository:
     def exists(self, concept_id: ConceptId) -> bool:
         return str(concept_id) in self.concepts
 
+    def delete(self, concept_id: ConceptId) -> None:
+        self.concepts.pop(str(concept_id), None)
+
 
 class FakeRawMaterialRepository:
-    def __init__(self, items: list[RawItem] | None = None) -> None:
+    def __init__(
+        self,
+        items: list[RawItem] | None = None,
+        source_concepts: dict[str, str] | None = None,
+    ) -> None:
         self.items = list(items or [])
         self.processed: list[str] = []
         self.rejected: dict[str, str] = {}
         self.errored: dict[str, str] = {}
         self.concept_links: dict[str, list[str]] = {}
+        self._source_concepts = source_concepts or {}
 
     def list_unprocessed(self) -> list[RawItem]:
         return [
@@ -64,6 +75,9 @@ class FakeRawMaterialRepository:
 
     def link_concept(self, raw_id: str, concept_id: str) -> None:
         self.concept_links.setdefault(raw_id, []).append(concept_id)
+
+    def find_source_concept(self, source_id: str) -> str | None:
+        return self._source_concepts.get(source_id)
 
 
 class FakeIntakeRepository:
@@ -99,6 +113,30 @@ class FakeIntakeRepository:
     def list_concepts_for(self, item_id: str) -> list[str]:
         return self.concept_links.get(item_id, [])
 
+    def delete(self, item_id: str) -> None:
+        self.items.pop(item_id, None)
+        self.concept_links.pop(item_id, None)
+
+    def list_stale_duplicates(self) -> list[IntakeItem]:
+        latest_by_path: dict[str, IntakeItem] = {}
+        for item in self.items.values():
+            if item.path is None:
+                continue
+            current = latest_by_path.get(item.path)
+            if current is None or item.discovered_at > current.discovered_at:
+                latest_by_path[item.path] = item
+
+        return sorted(
+            (
+                item
+                for item in self.items.values()
+                if item.path is not None
+                and item.state in (IntakeState.DISCOVERED, IntakeState.ERROR)
+                and item is not latest_by_path.get(item.path)
+            ),
+            key=lambda item: item.discovered_at,
+        )
+
 
 class FakeFileSystemScanner:
     def __init__(
@@ -116,10 +154,15 @@ class FakeFileSystemScanner:
 
 class FakeBundleLog:
     def __init__(self) -> None:
-        self.entries: list[str] = []
+        self.entries: list[dict] = []
 
-    def append(self, message: str) -> None:
-        self.entries.append(message)
+    def append(self, action, concept_id, raw_id, message) -> None:
+        self.entries.append(
+            {"action": action, "concept_id": concept_id, "raw_id": raw_id, "message": message}
+        )
+
+    def list_entries(self):
+        return list(reversed(self.entries))
 
 
 class FakeExtractionSkill:
@@ -154,12 +197,37 @@ class FakeDomainClassificationSkill:
         return self._verdict
 
 
+class FakeCategoryClassificationSkill:
+    def __init__(self, verdict: CategoryClassificationVerdict | None = None) -> None:
+        self._verdict = verdict or CategoryClassificationVerdict()
+
+    def classify(self, draft, known_categories) -> CategoryClassificationVerdict:
+        return self._verdict
+
+
 class FakeQualityEvalSkill:
     def __init__(self, scores: list[RubricScore]) -> None:
         self._scores = scores
 
     def evaluate(self, draft, rubrics, raw_content) -> list[RubricScore]:
         return self._scores
+
+
+class FakeRelatednessSkill:
+    def __init__(self, verdict: RelatednessVerdict | None = None) -> None:
+        self._verdict = verdict or RelatednessVerdict(related=[])
+
+    def judge(self, draft, candidates) -> RelatednessVerdict:
+        return self._verdict
+
+
+class FakeQualityAuditSkill:
+    def __init__(self, verdicts_by_id: dict[str, QualityAuditVerdict] | None = None) -> None:
+        self._verdicts_by_id = verdicts_by_id or {}
+        self._default = QualityAuditVerdict(standalone_quality=True)
+
+    def judge(self, concept) -> QualityAuditVerdict:
+        return self._verdicts_by_id.get(str(concept.id), self._default)
 
 
 class FakeEvalRubricsRepository:
@@ -204,10 +272,22 @@ class FakeMetadataRepository:
         self,
         known_types: list[str] | None = None,
         domain_ids: list[str] | None = None,
+        category_ids: list[str] | None = None,
+        fts_candidates: list[CandidateMatch] | None = None,
+        neighbors: dict[str, float] | None = None,
+        structured_ids: list[str] | None = None,
+        relations: list | None = None,
+        lineage_paths: list[list] | None = None,
     ) -> None:
         self.known_types = known_types or []
         self.domain_ids = domain_ids or []
+        self.category_ids = category_ids or []
         self.upserted: dict[str, Concept] = {}
+        self._fts_candidates = fts_candidates or []
+        self._neighbors = neighbors or {}
+        self._structured_ids = structured_ids or []
+        self._relations = relations or []
+        self._lineage_paths = lineage_paths or []
 
     def upsert(self, concept: Concept) -> None:
         self.upserted[str(concept.id)] = concept
@@ -215,8 +295,41 @@ class FakeMetadataRepository:
     def list_distinct_types(self, domain: str | None = None) -> list[str]:
         return self.known_types
 
-    def find_ids_by_type(self, concept_type: str) -> list[str]:
-        return self.domain_ids if concept_type == "Domain" else []
+    def find_ids_by_type(self, concept_type: str, domain: str | None = None) -> list[str]:
+        if concept_type == "Domain":
+            return self.domain_ids
+        if concept_type == "Category":
+            return self.category_ids
+        return []
+
+    def find_links(self, concept_id: str) -> LinkGraph:
+        return LinkGraph(concept_id=concept_id)
+
+    def find_by_type_and_date(self, concept_type: str, since=None, until=None) -> list[str]:
+        return self._structured_ids
+
+    def find_relations(self, concept_id: str, relation_type: str | None = None) -> list:
+        return self._relations
+
+    def trace_lineage(
+        self, concept_id: str, relation_type, direction: str, max_hops: int
+    ) -> list[list]:
+        return self._lineage_paths
+
+    def search_fts(self, query: str, k: int) -> list[CandidateMatch]:
+        return self._fts_candidates[:k]
+
+    def expand_neighbors(
+        self,
+        seed_ids: list[str],
+        max_hops: int,
+        decay: float,
+        category_decay: float,
+    ) -> dict[str, float]:
+        return {
+            concept_id: score for concept_id, score in self._neighbors.items()
+            if concept_id not in seed_ids
+        }
 
     def delete(self, concept_id: str) -> None:
         self.upserted.pop(concept_id, None)

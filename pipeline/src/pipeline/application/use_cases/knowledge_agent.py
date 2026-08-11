@@ -1,7 +1,10 @@
 """Orchestrates every LLM-backed skill over one raw item: extract, classify
 domain, find domain-scoped candidates, disambiguate, classify type, evaluate
-quality. Returns create/merge/reject decisions — it does not write anything
-itself (see ingest_raw_material.py)."""
+quality, judge relatedness among non-merged candidates above a minimum
+similarity score. Returns create/merge/reject decisions — it does not write
+anything itself (see ingest_raw_material.py, which also applies the
+resulting `CreateDecision.related` as reciprocal backlinks on the existing
+concepts judged related)."""
 
 from __future__ import annotations
 
@@ -20,6 +23,7 @@ from pipeline.application.ports.skills.entity_disambiguation import (
 )
 from pipeline.application.ports.skills.extraction import ExtractionSkillPort
 from pipeline.application.ports.skills.quality_eval import QualityEvalSkillPort
+from pipeline.application.ports.skills.relatedness import RelatednessSkillPort
 from pipeline.application.ports.skills.type_classification import (
     TypeClassificationSkillPort,
 )
@@ -30,12 +34,15 @@ from pipeline.domain.agent import (
     DomainCandidate,
     MergeDecision,
     RejectDecision,
+    RelatednessCandidate,
 )
 from pipeline.domain.concept import ConceptId
 from pipeline.domain.eval import DEFAULT_EVAL_THRESHOLD, aggregate_scores
+from pipeline.domain.linking import add_related_links
 from pipeline.domain.raw_material import RawItem
 
 DEFAULT_DISAMBIGUATION_CONFIDENCE_THRESHOLD = 0.75
+DEFAULT_RELATEDNESS_MIN_SCORE = 0.5
 DOMAIN_TYPE = "Domain"
 
 logger = logging.getLogger(__name__)
@@ -51,11 +58,13 @@ class KnowledgeAgent:
         type_classification: TypeClassificationSkillPort,
         domain_classification: DomainClassificationSkillPort,
         quality_eval: QualityEvalSkillPort,
+        relatedness: RelatednessSkillPort,
         eval_rubrics_repository: EvalRubricsRepositoryPort,
         metadata_repository: MetadataRepositoryPort,
         concept_repository: ConceptRepositoryPort,
         disambiguation_confidence_threshold: float = DEFAULT_DISAMBIGUATION_CONFIDENCE_THRESHOLD,
         eval_threshold: float = DEFAULT_EVAL_THRESHOLD,
+        relatedness_min_score: float = DEFAULT_RELATEDNESS_MIN_SCORE,
     ) -> None:
         self._extraction = extraction
         self._embedding = embedding
@@ -64,11 +73,13 @@ class KnowledgeAgent:
         self._type_classification = type_classification
         self._domain_classification = domain_classification
         self._quality_eval = quality_eval
+        self._relatedness = relatedness
         self._eval_rubrics_repository = eval_rubrics_repository
         self._metadata_repository = metadata_repository
         self._concept_repository = concept_repository
         self._threshold = disambiguation_confidence_threshold
         self._eval_threshold = eval_threshold
+        self._relatedness_min_score = relatedness_min_score
 
     def run(self, raw: RawItem) -> AgentResult:
         drafts = self._extraction.extract(raw)
@@ -125,8 +136,11 @@ class KnowledgeAgent:
             # domain acceptance, leaving the concept as an unvalidated,
             # domain-less node a future orphan-detection pass can find.
             final_domain = str(domain) if domain is not None and eval_result.passed else None
+            related = self._judge_related(draft, candidates)
+            body = add_related_links(draft.body, related)
             resolved_draft = replace(
                 draft,
+                body=body,
                 frontmatter=replace(
                     draft.frontmatter,
                     type=type_verdict.resolved_type,
@@ -134,9 +148,30 @@ class KnowledgeAgent:
                     eval=eval_result,
                 ),
             )
-            decisions.append(CreateDecision(concept=resolved_draft))
+            decisions.append(CreateDecision(concept=resolved_draft, related=related))
 
         return AgentResult(decisions=decisions)
+
+    def _judge_related(self, draft, candidates) -> list:
+        """Judges which candidates (already ruled out as the same entity) are
+        genuinely related and worth linking to — how clusters emerge in the
+        link graph instead of relying on flat tags. Candidates below
+        `relatedness_min_score` are filtered out before ever reaching the
+        skill, so a sparsely-populated domain can't surface weak matches the
+        model might otherwise rationalize post-hoc."""
+        strong_candidates = [c for c in candidates if c.score >= self._relatedness_min_score]
+        if not strong_candidates:
+            return []
+
+        enriched = [
+            RelatednessCandidate(
+                concept_id=c.concept_id,
+                title=self._concept_repository.load(c.concept_id).frontmatter.title,
+                score=c.score,
+            )
+            for c in strong_candidates
+        ]
+        return self._relatedness.judge(draft, enriched).related
 
     def _classify_domain(self, draft) -> ConceptId | None:
         domain_ids = self._metadata_repository.find_ids_by_type(DOMAIN_TYPE)

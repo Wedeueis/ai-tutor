@@ -56,6 +56,7 @@ class Settings:
     vault_path: Path
     ollama_host: str
     ollama_chat_model: str
+    ollama_relatedness_model: str
     ollama_embed_model: str
     ollama_vision_model: str
     ollama_timeout_seconds: float
@@ -70,6 +71,7 @@ class Settings:
     chunk_max_chars: int
     disambiguation_confidence_threshold: float
     eval_threshold: float
+    relatedness_min_score: float
     log_level: str
     mcp_host: str
     mcp_port: int
@@ -79,12 +81,14 @@ class Settings:
     @classmethod
     def from_env(cls) -> Settings:
         data_dir = _PIPELINE_ROOT / ".data"
+        chat_model = os.environ.get("OLLAMA_CHAT_MODEL", "llama3.1:8b")
         return cls(
             vault_path=Path(
                 os.environ.get("VAULT_PATH", str(_PIPELINE_ROOT.parent / "vault"))
             ).resolve(),
             ollama_host=os.environ.get("OLLAMA_HOST", "http://localhost:11434"),
-            ollama_chat_model=os.environ.get("OLLAMA_CHAT_MODEL", "llama3.1:8b"),
+            ollama_chat_model=chat_model,
+            ollama_relatedness_model=os.environ.get("OLLAMA_RELATEDNESS_MODEL", chat_model),
             ollama_embed_model=os.environ.get("OLLAMA_EMBED_MODEL", "nomic-embed-text"),
             ollama_vision_model=os.environ.get("OLLAMA_VISION_MODEL", "llava"),
             ollama_timeout_seconds=_float_env("OLLAMA_TIMEOUT_SECONDS", 300.0),
@@ -103,6 +107,7 @@ class Settings:
                 "DISAMBIGUATION_CONFIDENCE_THRESHOLD", 0.75
             ),
             eval_threshold=_float_env("EVAL_THRESHOLD", 0.7),
+            relatedness_min_score=_float_env("RELATEDNESS_MIN_SCORE", 0.5),
             log_level=os.environ.get("LOG_LEVEL", "INFO"),
             mcp_host=os.environ.get("MCP_HOST", "127.0.0.1"),
             mcp_port=_int_env("MCP_PORT", 8000),

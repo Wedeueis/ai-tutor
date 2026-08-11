@@ -13,7 +13,6 @@ from pipeline.adapters.eval_rubrics.json_file_eval_rubrics_repository import (
     JsonFileEvalRubricsRepository,
 )
 from pipeline.adapters.filesystem.filesystem_scanner import FilesystemScanner
-from pipeline.adapters.filesystem.markdown_bundle_log import MarkdownBundleLog
 from pipeline.adapters.filesystem.markdown_concept_repository import MarkdownConceptRepository
 from pipeline.adapters.filesystem.raw_material_repository import FilesystemRawMaterialRepository
 from pipeline.adapters.ollama.client import OllamaClient
@@ -26,19 +25,24 @@ from pipeline.adapters.ollama.skills.entity_disambiguation import (
 )
 from pipeline.adapters.ollama.skills.extraction import OllamaExtractionSkill
 from pipeline.adapters.ollama.skills.image_captioning import OllamaImageCaptioningSkill
+from pipeline.adapters.ollama.skills.quality_audit import OllamaQualityAuditSkill
 from pipeline.adapters.ollama.skills.quality_eval import OllamaQualityEvalSkill
+from pipeline.adapters.ollama.skills.relatedness import OllamaRelatednessSkill
 from pipeline.adapters.ollama.skills.type_classification import (
     OllamaTypeClassificationSkill,
 )
 from pipeline.adapters.schema_registry.json_file_schema_registry import (
     JsonFileSchemaRegistry,
 )
+from pipeline.adapters.sqlite.sqlite_bundle_log import SqliteBundleLog
 from pipeline.adapters.sqlite.sqlite_intake_repository import SqliteIntakeRepository
 from pipeline.adapters.sqlite.sqlite_metadata_repository import SqliteMetadataRepository
+from pipeline.application.use_cases.audit_concept_quality import AuditConceptQuality
 from pipeline.application.use_cases.index_concept import IndexConcept
 from pipeline.application.use_cases.ingest_raw_material import IngestRawMaterial
 from pipeline.application.use_cases.knowledge_agent import KnowledgeAgent
 from pipeline.application.use_cases.parse_source_documents import ParseSourceDocuments
+from pipeline.application.use_cases.prune_stale_intake import PruneStaleIntake
 from pipeline.application.use_cases.rebuild_index import RebuildIndex
 from pipeline.application.use_cases.scan_intake import ScanIntake
 from pipeline.application.use_cases.search_concepts import SearchConcepts
@@ -67,7 +71,7 @@ class Container:
         self.raw_material_repository = FilesystemRawMaterialRepository(
             self.intake_repository, self.scanner
         )
-        self.bundle_log = MarkdownBundleLog(settings.vault_path / "log.md")
+        self.bundle_log = SqliteBundleLog(settings.sqlite_path)
 
         ollama = OllamaClient(
             settings.ollama_host,
@@ -88,6 +92,10 @@ class Container:
             ollama, settings.ollama_chat_model
         )
         self.quality_eval_skill = OllamaQualityEvalSkill(ollama, settings.ollama_chat_model)
+        self.quality_audit_skill = OllamaQualityAuditSkill(ollama, settings.ollama_chat_model)
+        self.relatedness_skill = OllamaRelatednessSkill(
+            ollama, settings.ollama_relatedness_model
+        )
         self.image_captioning_skill = OllamaImageCaptioningSkill(
             ollama, settings.ollama_vision_model
         )
@@ -102,6 +110,9 @@ class Container:
         self.index_concept = IndexConcept(
             self.embedding, self.vector_search, self.metadata_repository
         )
+        self.audit_concept_quality = AuditConceptQuality(
+            self.concept_repository, self.quality_audit_skill
+        )
         self.knowledge_agent = KnowledgeAgent(
             extraction=self.extraction_skill,
             embedding=self.embedding,
@@ -110,11 +121,13 @@ class Container:
             type_classification=self.type_classification_skill,
             domain_classification=self.domain_classification_skill,
             quality_eval=self.quality_eval_skill,
+            relatedness=self.relatedness_skill,
             eval_rubrics_repository=self.eval_rubrics_repository,
             metadata_repository=self.metadata_repository,
             concept_repository=self.concept_repository,
             disambiguation_confidence_threshold=settings.disambiguation_confidence_threshold,
             eval_threshold=settings.eval_threshold,
+            relatedness_min_score=settings.relatedness_min_score,
         )
         self.ingest_raw_material = IngestRawMaterial(
             raw_material_repository=self.raw_material_repository,
@@ -127,10 +140,14 @@ class Container:
         self.rebuild_index = RebuildIndex(self.concept_repository, self.index_concept)
         self.search_concepts = SearchConcepts(self.embedding, self.vector_search)
         self.scan_intake = ScanIntake(self.scanner, self.intake_repository)
+        self.prune_stale_intake = PruneStaleIntake(self.intake_repository)
         self.parse_source_documents = ParseSourceDocuments(
             self.intake_repository,
             self.document_parser,
             self.image_captioning_skill,
+            self.concept_repository,
+            self.index_concept,
+            self.bundle_log,
             max_chunk_chars=settings.chunk_max_chars,
         )
 
@@ -151,6 +168,22 @@ def scan() -> None:
         return
     for item in new_items:
         typer.echo(f"discovered {item.id[:12]}  {item.kind.value}  {item.path}")
+
+
+@app.command()
+def prune() -> None:
+    """Delete stale intake items: rows superseded by a later hash at the same
+    path that never got past `discovered`/`error`, so nothing was ever
+    derived from them. `scan` already prevents new ones from piling up going
+    forward — this cleans up ones that predate that (or slipped through
+    another way)."""
+    container = _container()
+    removed = container.prune_stale_intake.run()
+    if not removed:
+        typer.echo("Nothing stale to prune.")
+        return
+    for item in removed:
+        typer.echo(f"removed {item.id[:12]}  {item.kind.value}  {item.path}")
 
 
 @app.command()
@@ -201,7 +234,10 @@ def parse_sources() -> None:
         if outcome.errored:
             typer.echo(f"error parsing {outcome.source_id[:12]}  — {outcome.errored}")
         else:
-            typer.echo(f"parsed {outcome.source_id[:12]}  -> {len(outcome.chunk_ids)} chunk(s)")
+            skipped = f", {outcome.skipped} skipped as garbled" if outcome.skipped else ""
+            typer.echo(
+                f"parsed {outcome.source_id[:12]}  -> {len(outcome.chunk_ids)} chunk(s){skipped}"
+            )
 
 
 @app.command()
@@ -241,6 +277,46 @@ def validate(path: str) -> None:
     raise typer.Exit(code=1)
 
 
+@app.command()
+def audit() -> None:
+    """Flag concepts that don't stand alone as genuinely useful — a garbled
+    table fragment (free, no LLM call), or anything QualityAuditSkillPort
+    judges thin/vacuous. Purely a report; use `pipeline delete <id>` to
+    actually remove one."""
+    container = _container()
+    flags = container.audit_concept_quality.run()
+    if not flags:
+        typer.echo("No low-quality concepts found.")
+        return
+    for flag in flags:
+        typer.echo(f"{flag.concept_id}  — {flag.reason}")
+
+
+@app.command(name="delete")
+def delete_concept(path: str) -> None:
+    """Remove one concept from the vault and its metadata/vector indices —
+    the actual cleanup action for anything `pipeline audit` flags. Does not
+    touch other concepts' links to it (broken links are tolerated by OKF §6;
+    rewriting arbitrary other files isn't a deletion side effect)."""
+    container = _container()
+    concept_id = ConceptId(path[:-3] if path.endswith(".md") else path)
+    if not container.concept_repository.exists(concept_id):
+        typer.echo(f"no concept with id {concept_id}")
+        raise typer.Exit(code=1)
+
+    concept = container.concept_repository.load(concept_id)
+    container.concept_repository.delete(concept_id)
+    container.metadata_repository.delete(str(concept_id))
+    container.vector_search.delete(str(concept_id))
+    container.bundle_log.append(
+        action="delete",
+        concept_id=str(concept_id),
+        raw_id=None,
+        message=f"Removed {concept.frontmatter.title or concept_id}.",
+    )
+    typer.echo(f"deleted {concept_id}")
+
+
 @app.command(name="index")
 def index_command() -> None:
     """Rebuild the vector + metadata index from every concept in the vault."""
@@ -270,7 +346,9 @@ def new_domain(
         body=f"# {title}\n\n*(no concepts yet — add links here as they're created)*\n",
     )
     container.concept_repository.save(domain)
-    container.bundle_log.append(f"**Creation**: Added Domain [{title}]({domain_id}.md).")
+    container.bundle_log.append(
+        action="create", concept_id=str(domain_id), raw_id=None, message=f"Added Domain {title}."
+    )
 
     rubrics_path = container.settings.evals_dir / f"{domain_id}.json"
     rubrics_path.parent.mkdir(parents=True, exist_ok=True)
@@ -293,7 +371,37 @@ def new_domain(
 
     typer.echo(f"created {domain_id}")
     typer.echo(f"created {rubrics_path}")
-    typer.echo("Link it from MOC.md and fill in real eval rubrics.")
+    typer.echo("Link it from Home.md and fill in real eval rubrics.")
+
+
+@app.command(name="log")
+def log_command(limit: int = 20) -> None:
+    """Show the pipeline's ingest audit trail (create/merge/reject decisions),
+    newest first — the structured, queryable replacement for the old
+    vault/log.md (WIKI_SPEC.md §9)."""
+    container = _container()
+    entries = container.bundle_log.list_entries()
+    if not entries:
+        typer.echo("No log entries yet.")
+        return
+    for entry in entries[:limit]:
+        concept = f" concept={entry.concept_id}" if entry.concept_id else ""
+        raw = f" raw={entry.raw_id[:12]}" if entry.raw_id else ""
+        typer.echo(f"{entry.at.isoformat()}  {entry.action:<7}{concept}{raw}  {entry.message}")
+
+
+@app.command()
+def links(concept_id: str) -> None:
+    """Show outgoing and incoming §6 links for one concept — the emergent
+    cluster of related concepts around it, independent of tags."""
+    container = _container()
+    graph = container.metadata_repository.find_links(concept_id)
+    typer.echo("outgoing:")
+    for target in graph.outgoing:
+        typer.echo(f"  {target}")
+    typer.echo("incoming:")
+    for source in graph.incoming:
+        typer.echo(f"  {source}")
 
 
 @app.command()

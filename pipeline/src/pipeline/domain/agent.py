@@ -67,12 +67,57 @@ class DomainClassificationVerdict:
 
 
 @dataclass(frozen=True)
+class RelatednessCandidate:
+    """One existing concept, not judged the same entity as the draft, offered
+    to the relatedness skill as something the draft might still be worth
+    linking to."""
+
+    concept_id: ConceptId
+    title: str | None
+    score: float
+
+
+@dataclass(frozen=True)
+class RelatedConcept:
+    """One existing concept the relatedness skill judged genuinely related to
+    a draft — becomes a §6 link in the draft's body, not a merge."""
+
+    concept_id: ConceptId
+    title: str | None
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class RelatednessVerdict:
+    """Which of the offered candidates, if any, are genuinely related to the
+    draft. Empty when nothing is related enough to link."""
+
+    related: list[RelatedConcept] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class QualityAuditVerdict:
+    """Whether an already-published concept stands alone as genuinely useful
+    knowledge, judged directly against its own body — no raw source needed,
+    since this audits existing vault content rather than a fresh draft. Used
+    by AuditConceptQuality (`pipeline audit`), not KnowledgeAgent."""
+
+    standalone_quality: bool
+    reason: str = ""
+
+
+@dataclass(frozen=True)
 class CreateDecision:
     """A brand-new draft to write. Quality-eval failure never blocks this — it
     only withholds `domain` (see knowledge_agent.py) — so this decision always
     means the concept gets created."""
 
     concept: DraftConcept
+    related: list[RelatedConcept] = field(default_factory=list)
+    """Existing concepts judged related (already woven into `concept.body` as
+    forward links) — carried here too so IngestRawMaterial can also write a
+    reciprocal backlink into each existing concept's own body, keeping
+    relatedness from being one-directional and order-dependent."""
 
 
 @dataclass(frozen=True)
