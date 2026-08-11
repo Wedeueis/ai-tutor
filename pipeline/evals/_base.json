@@ -23,7 +23,7 @@
   {
     "rubric_id": "substantial",
     "rubric_content": {
-      "text_property": "The body must be substantial enough to be useful on its own, not a single vague sentence."
+      "text_property": "The body must be substantial enough to be useful on its own, not a single vague sentence. This also rules out a fragment of a larger table or list that only makes sense next to sibling data — e.g. a bare list of numbers/values, an isolated table row or cell, or prose that just describes 'this is a data point' or 'this table contains values' without conveying any real, standalone insight."
     },
     "type": "CONTENT_QUALITY"
   }

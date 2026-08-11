@@ -13,15 +13,13 @@ service, no external API key, in the loop.
 ## Quickstart
 
 ```bash
-uv sync
+make install   # or: uv sync
 ollama pull llama3.1:8b nomic-embed-text llava
 
 # put something in the capture inbox, then run it through the pipeline
 echo "Cold brew steeps 12-24 hours in cold water, coarser grind than drip." \
   > ../vault/raw/cold-brew.md
-uv run pipeline scan
-uv run pipeline ingest
-uv run pipeline index
+make pipeline   # scan -> parse-sources -> ingest -> index
 
 uv run pipeline search "cold brew steep time"
 ```
@@ -32,11 +30,17 @@ Serve the vault to Claude over MCP:
 uv run pipeline mcp-serve --port 8000   # stateless Streamable HTTP at /mcp
 ```
 
-Run the tests and linter:
+Run `make help` for the full list of shortcuts (pipeline commands, lint,
+tests). Tests are split by cost — `make test` (the default you want in the
+edit/test loop) skips anything marked `integration` in
+[`tests/conftest.py`](tests/conftest.py): tests needing a real local Ollama,
+and the Docling parser test (loads ML models on first use). Those run
+separately via `make test-integration`; `make test-all` runs everything.
 
 ```bash
-uv run pytest -q
-uv run ruff check .
+make test              # fast — no live Ollama, no Docling model loads
+make test-integration  # slow — needs Ollama running locally
+make lint
 ```
 
 See [`docs/getting-started.md`](docs/getting-started.md) for the full

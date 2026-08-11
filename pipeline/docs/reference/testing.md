@@ -1,10 +1,15 @@
 # Testing
 
 ```bash
-uv run pytest -q
+make test        # fast — excludes the `integration` marker (see below)
+make test-all     # everything, including the slow/integration tests
 ```
 
-109 tests as of this writing, split into three tiers that mirror
+(equivalent to `uv run pytest -q -m "not integration"` / `uv run pytest -q`,
+if you'd rather call pytest directly — see `pipeline/Makefile` for the full
+list of shortcuts.)
+
+157 tests as of this writing, split into three tiers that mirror
 `src/pipeline/`:
 
 ```
@@ -103,6 +108,7 @@ behavior.
 ```bash
 uv run pytest tests/domain -q                 # fast, no I/O at all
 uv run pytest tests/application -q            # use cases, still no real adapters
-uv run pytest -m "not integration" -q         # skip Ollama-dependent tests explicitly
+make test                                     # -m "not integration" — same split, via Makefile
+make test-integration                         # only the integration-marked tests
 uv run pytest tests/adapters/test_chroma_vector_search.py -q
 ```

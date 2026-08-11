@@ -9,24 +9,24 @@ them inherit from the `Protocol` class.
 
 | Port (`application/ports/`) | Method surface | Adapter (`adapters/`) | Backing technology |
 |---|---|---|---|
-| `ConceptRepositoryPort` | `load`, `save`, `list`, `exists` | `filesystem.markdown_concept_repository.MarkdownConceptRepository` | Markdown + YAML frontmatter files under the vault root, via `frontmatter_codec.py` / `frontmatter_mapping.py` |
+| `ConceptRepositoryPort` | `load`, `save`, `list`, `exists`, `delete` | `filesystem.markdown_concept_repository.MarkdownConceptRepository` | Markdown + YAML frontmatter files under the vault root, via `frontmatter_codec.py` / `frontmatter_mapping.py` |
 | `VectorSearchPort` | `upsert`, `query`, `delete` | `chroma.chroma_vector_search.ChromaVectorSearch` | A persistent ChromaDB collection (`concepts`, cosine space) |
-| `MetadataRepositoryPort` | `upsert`, `list_distinct_types`, `find_ids_by_type`, `delete` | `sqlite.sqlite_metadata_repository.SqliteMetadataRepository` | SQLite `concepts` + `links` tables |
+| `MetadataRepositoryPort` | `upsert`, `list_distinct_types`, `find_ids_by_type`, `find_links`, `delete` | `sqlite.sqlite_metadata_repository.SqliteMetadataRepository` | SQLite `concepts` + `links` tables |
 | `EmbeddingPort` | `embed` | `ollama.embedding.OllamaEmbedding` | Ollama `/api/embeddings`, via `ollama.client.OllamaClient` |
 | `FileSystemScannerPort` | `scan`, `read_text` | `filesystem.filesystem_scanner.FilesystemScanner` | Local filesystem, SHA-256 content hashing |
 | `IntakeRepositoryPort` | `find_by_path`, `upsert`, `get`, `list_by_state`, `list_children`, `link_concept`, `list_concepts_for` | `sqlite.sqlite_intake_repository.SqliteIntakeRepository` | SQLite `intake_items` + `intake_item_concepts` tables |
-| `RawMaterialRepositoryPort` | `list_unprocessed`, `mark_processed`, `mark_rejected`, `link_concept` | `filesystem.raw_material_repository.FilesystemRawMaterialRepository` | Reads through `IntakeRepositoryPort` + `FileSystemScannerPort` — state lives in the intake DB, not on disk |
+| `RawMaterialRepositoryPort` | `list_unprocessed`, `mark_processed`, `mark_rejected`, `link_concept`, `find_source_concept` | `filesystem.raw_material_repository.FilesystemRawMaterialRepository` | Reads through `IntakeRepositoryPort` + `FileSystemScannerPort` — state lives in the intake DB, not on disk. `find_source_concept` resolves a chunk's source-document id to its `references/` hub concept id, via `IntakeRepositoryPort.list_concepts_for` (the same link table chunk↔concept links use). |
 | `DocumentParsingPort` | `parse` | `docling.document_parser.DoclingDocumentParser` | [Docling](https://github.com/docling-project/docling) — layout-aware PDF/DOCX/PPTX/XLSX/image parsing |
 | `SchemaRegistryPort` | `get_schema` | `schema_registry.json_file_schema_registry.JsonFileSchemaRegistry` | `pipeline/schemas/<Type>.schema.json`, falling back to `_base.schema.json` |
 | `EvalRubricsRepositoryPort` | `load_for_domain` | `eval_rubrics.json_file_eval_rubrics_repository.JsonFileEvalRubricsRepository` | `pipeline/evals/<domain-id>.json`, falling back to `_base.json` |
-| `BundleLogPort` | `append` | `filesystem.markdown_bundle_log.MarkdownBundleLog` | The vault's `log.md`, date-grouped entries (OKF §9) |
+| `BundleLogPort` | `append`, `list_entries` | `sqlite.sqlite_bundle_log.SqliteBundleLog` | SQLite `bundle_log` table — structured ingest audit trail. This is pipeline governance state, not vault content: WIKI_SPEC.md §9's `log.md` is optional and this bundle intentionally doesn't populate it (see `pipeline log`, the `okf://log` MCP resource). |
 | `ExecutorPort` | `run` | `stubs.not_implemented_executor.NotImplementedExecutor` | **Stub** — raises `NotImplementedError` (OKF §10.2, no computation exists yet) |
 | `AttesterPort` | `verify` | `stubs.not_implemented_attester.NotImplementedAttester` | **Stub** — raises `NotImplementedError` (OKF §10.2) |
 
 ## Skill ports (`application/ports/skills/`)
 
-All six are LLM-backed judgment calls, and all six currently have exactly one
-adapter, backed by a local Ollama chat or vision model via the shared
+All seven are LLM-backed judgment calls, and all seven currently have exactly
+one adapter, backed by a local Ollama chat or vision model via the shared
 `adapters/ollama/client.py::OllamaClient`.
 
 | Port | Method | Adapter | Model used |
@@ -36,7 +36,16 @@ adapter, backed by a local Ollama chat or vision model via the shared
 | `TypeClassificationSkillPort` | `classify(draft, known_types) -> TypeClassificationVerdict` | `ollama.skills.type_classification.OllamaTypeClassificationSkill` | `OLLAMA_CHAT_MODEL` |
 | `DomainClassificationSkillPort` | `classify(draft, candidates) -> DomainClassificationVerdict` | `ollama.skills.domain_classification.OllamaDomainClassificationSkill` | `OLLAMA_CHAT_MODEL` |
 | `QualityEvalSkillPort` | `evaluate(draft, rubrics, raw_content) -> list[RubricScore]` | `ollama.skills.quality_eval.OllamaQualityEvalSkill` | `OLLAMA_CHAT_MODEL` |
+| `QualityAuditSkillPort` | `judge(concept) -> QualityAuditVerdict` | `ollama.skills.quality_audit.OllamaQualityAuditSkill` | `OLLAMA_CHAT_MODEL` |
+| `RelatednessSkillPort` | `judge(draft, candidates) -> RelatednessVerdict` | `ollama.skills.relatedness.OllamaRelatednessSkill` | `OLLAMA_RELATEDNESS_MODEL` |
 | `ImageCaptioningSkillPort` | `caption(image) -> str` | `ollama.skills.image_captioning.OllamaImageCaptioningSkill` | `OLLAMA_VISION_MODEL` |
+
+`QualityAuditSkillPort` is the odd one out structurally: every other skill
+judges a fresh `DraftConcept` during ingest; this one judges an
+already-published `Concept` on demand (`pipeline audit`), asking whether its
+body stands alone as genuinely useful rather than being a thin/vacuous
+fragment — the retroactive counterpart to `QualityEvalSkillPort`, which only
+ever sees content at creation/merge time against its raw source.
 
 Every skill adapter follows the same shape: a module-level `_PROMPT`
 template instructing the model to respond with **only** a JSON value, a
