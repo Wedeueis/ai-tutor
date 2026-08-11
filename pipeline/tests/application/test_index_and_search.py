@@ -63,11 +63,96 @@ def test_rebuild_index_reindexes_every_concept():
     assert set(vector_search.upserted) == {"a", "b"}
 
 
-def test_search_concepts_delegates_to_vector_search():
+def test_search_concepts_stage0_returns_structured_hits_directly():
+    vector_search = FakeVectorSearch(candidates=[])
+    metadata_repository = FakeMetadataRepository(structured_ids=["a", "b", "c"])
+    use_case = SearchConcepts(FakeEmbedding(), vector_search, metadata_repository)
+
+    results = use_case.run("query", type="Decision")
+
+    assert [r.concept_id for r in results] == [ConceptId("a"), ConceptId("b"), ConceptId("c")]
+    assert all(r.score == 1.0 for r in results)
+
+
+def test_search_concepts_falls_back_to_hybrid_when_structured_hits_are_too_few():
+    semantic_hit = CandidateMatch(concept_id=ConceptId("semantic-hit"), score=0.9)
+    vector_search = FakeVectorSearch(candidates=[semantic_hit])
+    metadata_repository = FakeMetadataRepository(structured_ids=["a"])  # below default min of 3
+    use_case = SearchConcepts(FakeEmbedding(), vector_search, metadata_repository)
+
+    results = use_case.run("query", type="Decision")
+
+    assert ConceptId("semantic-hit") in [r.concept_id for r in results]
+
+
+def test_search_concepts_ranks_semantic_hit_first():
     candidate = CandidateMatch(concept_id=ConceptId("a"), score=0.9)
     vector_search = FakeVectorSearch(candidates=[candidate])
-    use_case = SearchConcepts(FakeEmbedding(), vector_search)
+    use_case = SearchConcepts(FakeEmbedding(), vector_search, FakeMetadataRepository())
 
     results = use_case.run("query")
 
-    assert results == [candidate]
+    assert [r.concept_id for r in results] == [ConceptId("a")]
+
+
+def test_search_concepts_surfaces_lexical_only_match():
+    vector_search = FakeVectorSearch(candidates=[])
+    lexical_hit = CandidateMatch(concept_id=ConceptId("lexical-only"), score=1.0)
+    metadata_repository = FakeMetadataRepository(fts_candidates=[lexical_hit])
+    use_case = SearchConcepts(FakeEmbedding(), vector_search, metadata_repository)
+
+    results = use_case.run("query")
+
+    assert ConceptId("lexical-only") in [r.concept_id for r in results]
+
+
+def test_search_concepts_surfaces_graph_only_match():
+    vector_search = FakeVectorSearch(candidates=[CandidateMatch(concept_id=ConceptId("a"), score=0.9)])
+    metadata_repository = FakeMetadataRepository(neighbors={"graph-neighbor": 0.4})
+    use_case = SearchConcepts(FakeEmbedding(), vector_search, metadata_repository)
+
+    results = use_case.run("query")
+
+    assert ConceptId("graph-neighbor") in [r.concept_id for r in results]
+
+
+def test_search_concepts_boosts_a_fused_hit_thats_also_graph_connected():
+    # "b" ranks second in the semantic leg (so it's part of stage 1's fused
+    # output but, with graph_seed_k=1, isn't itself a graph-expansion seed —
+    # seeds are excluded from expand_neighbors, so only a non-seed fused hit
+    # can also show up in the graph leg).
+    vector_search = FakeVectorSearch(
+        candidates=[
+            CandidateMatch(concept_id=ConceptId("a"), score=0.9),
+            CandidateMatch(concept_id=ConceptId("b"), score=0.1),
+        ]
+    )
+    fused_only = SearchConcepts(
+        FakeEmbedding(), vector_search, FakeMetadataRepository(), graph_seed_k=1
+    ).run("query")
+    fused_only_score_b = next(r.score for r in fused_only if r.concept_id == ConceptId("b"))
+
+    metadata_repository = FakeMetadataRepository(neighbors={"b": 0.4})
+    use_case = SearchConcepts(FakeEmbedding(), vector_search, metadata_repository, graph_seed_k=1)
+
+    results = use_case.run("query")
+
+    result_b = next(r for r in results if r.concept_id == ConceptId("b"))
+    # Boosted multiplicatively (bounded to at most 2x, at graph_score=1.0),
+    # never just replaced by the graph-decay score outright — RRF and
+    # hop-decay scores are on very different scales, so naively taking
+    # max() would let graph expansion dominate the whole ranking instead of
+    # reranking within it.
+    assert result_b.score == fused_only_score_b * 1.4
+
+
+def test_search_concepts_graph_only_hit_never_outranks_a_fused_hit():
+    vector_search = FakeVectorSearch(candidates=[CandidateMatch(concept_id=ConceptId("a"), score=0.9)])
+    # A large decay score (bigger than any RRF score) that would previously
+    # have let this graph-only concept rank #1 via max().
+    metadata_repository = FakeMetadataRepository(neighbors={"graph-neighbor": 0.9})
+    use_case = SearchConcepts(FakeEmbedding(), vector_search, metadata_repository)
+
+    results = use_case.run("query")
+
+    assert [r.concept_id for r in results] == [ConceptId("a"), ConceptId("graph-neighbor")]

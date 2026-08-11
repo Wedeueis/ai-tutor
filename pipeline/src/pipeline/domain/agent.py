@@ -19,8 +19,11 @@ class DraftConcept:
 
 @dataclass(frozen=True)
 class CandidateMatch:
-    """One existing concept surfaced as a possible match for a draft, with its
-    similarity score from vector search."""
+    """One existing concept surfaced as a possible match — from a draft-match
+    search (vector-search cosine similarity) or from `SearchConcepts` (a fused
+    rank-based score: reciprocal rank fusion across semantic/lexical results,
+    or a hop-decayed graph-expansion score — not a single homogeneous 0-1
+    cosine similarity)."""
 
     concept_id: ConceptId
     score: float
@@ -63,6 +66,29 @@ class DomainClassificationVerdict:
 
     domain: ConceptId | None
     confidence: float
+    rationale: str = ""
+
+
+@dataclass(frozen=True)
+class CategoryCandidate:
+    """One existing `type: Category` concept under a draft's chosen domain,
+    offered to the category-classification skill as something the draft
+    might belong to."""
+
+    concept_id: ConceptId
+    title: str | None
+
+
+@dataclass(frozen=True)
+class CategoryClassificationVerdict:
+    """Which existing Categories a draft belongs to (zero or more — a concept
+    can belong to several), plus any category titles proposed as new (minted
+    only when nothing existing plausibly fits, mirroring
+    `TypeClassificationVerdict.is_new_type`)."""
+
+    categories: list[ConceptId] = field(default_factory=list)
+    new_categories: list[str] = field(default_factory=list)
+    confidence: float = 0.0
     rationale: str = ""
 
 
@@ -118,6 +144,13 @@ class CreateDecision:
     forward links) — carried here too so IngestRawMaterial can also write a
     reciprocal backlink into each existing concept's own body, keeping
     relatedness from being one-directional and order-dependent."""
+    new_categories: list[str] = field(default_factory=list)
+    """Category titles the classification skill proposed as new (nothing
+    existing fit) — carried here because `KnowledgeAgent` can't materialize
+    concepts itself; `IngestRawMaterial` creates each one as a real
+    `type: Category` concept and links `concept.body` to it. Existing-category
+    assignments, by contrast, are already woven into `concept.body` as links
+    by `KnowledgeAgent`, the same way `related` links are."""
 
 
 @dataclass(frozen=True)

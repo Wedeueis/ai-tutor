@@ -16,6 +16,7 @@ from pipeline.application.ports.concept_repository import ConceptRepositoryPort
 from pipeline.application.ports.raw_material_repository import (
     RawMaterialRepositoryPort,
 )
+from pipeline.application.use_cases.category_materializer import CategoryMaterializer
 from pipeline.application.use_cases.index_concept import IndexConcept
 from pipeline.application.use_cases.knowledge_agent import KnowledgeAgent
 from pipeline.domain.agent import CreateDecision, MergeDecision, RejectDecision, RelatedConcept
@@ -65,6 +66,9 @@ class IngestRawMaterial:
         self._concept_repository = concept_repository
         self._index_concept = index_concept
         self._bundle_log = bundle_log
+        self._category_materializer = CategoryMaterializer(
+            concept_repository, index_concept, bundle_log
+        )
 
     def run(self) -> list[IngestOutcome]:
         unprocessed = self._raw_material_repository.list_unprocessed()
@@ -110,6 +114,9 @@ class IngestRawMaterial:
         for decision in agent_result.decisions:
             if isinstance(decision, CreateDecision):
                 concept = self._materialize(decision)
+                concept = self._category_materializer.link_new_categories(
+                    concept, decision.new_categories, raw.id
+                )
                 if source_concept_id:
                     concept = replace(
                         concept, frontmatter=_add_source(concept.frontmatter, source_concept_id)

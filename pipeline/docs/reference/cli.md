@@ -23,6 +23,9 @@ discovered a1b2c3d4e5f6  raw_note  /path/to/vault/raw/my-note.md
 ```
 
 Unchanged files (same content hash as already tracked) are silently skipped.
+If a file's content changes and its previous intake item never got past
+`discovered`/`error`, the stale row is deleted automatically — no manual
+cleanup needed for a file you replace before it's ever parsed or ingested.
 Run this before `parse-sources` or `ingest` — they only act on items already
 discovered.
 
@@ -35,6 +38,25 @@ pipeline status
 Shows intake item counts grouped by `(state, kind)`, then lists every item
 currently in `rejected` or `error` state with its path and error message —
 the quickest way to see what needs attention.
+
+## `prune`
+
+```bash
+pipeline prune
+```
+
+Deletes stale intake items: rows superseded by a later hash at the same path
+that never got past `discovered`/`error` (e.g. you replaced a raw file
+before `parse-sources`/`ingest` ever touched the old version). `scan` (above)
+already stops new ones from accumulating going forward — `prune` cleans up
+ones that predate that fix, or that piled up some other way. Items that were
+actually `parsed`/`ingested`/`rejected` are never touched, even if later
+superseded — that's audit history, not cruft. Prints one line per item
+removed:
+
+```
+removed e3b0c44298fc  source_document  /path/to/vault/raw/report.pdf
+```
 
 ## `retry <item-id>`
 
@@ -55,10 +77,15 @@ pipeline parse-sources
 Runs `scan` first, then `ParseSourceDocuments`: turns every discovered
 `SOURCE_DOCUMENT` (PDF/PPTX/DOCX/XLSX/image) into markdown, captions any
 extracted images, and splits the result into chunks — each becoming its own
-intake item ready for `ingest`. Prints:
+intake item ready for `ingest`. Any chunk that looks like a garbled table
+dump rather than prose (`domain/text_quality.py::looks_like_garbled_table` —
+e.g. a mangled Docling table parse) is skipped instead of registered, so it
+never reaches extraction; nothing is destroyed, the source document is
+untouched in `vault/raw/`. Prints:
 
 ```
 parsed a1b2c3d4e5f6  -> 4 chunk(s)
+parsed 9f8e7d6c5b4a  -> 30 chunk(s), 3 skipped as garbled
 ```
 
 No-op (with a message) if there are no source documents to parse. A document
@@ -78,8 +105,9 @@ pipeline ingest
 
 Runs `scan` first, then `IngestRawMaterial`: drives every unprocessed raw
 note or chunk through the `KnowledgeAgent`, applies its create/merge
-decisions to the vault, indexes whatever changed, and appends to `log.md`.
-Prints one line per outcome:
+decisions to the vault, indexes whatever changed, and appends an entry to
+the pipeline's SQLite audit log (see `pipeline log` below). Prints one line
+per outcome:
 
 ```
 created domains/coffee/cold-brew-coffee  (from raw/a1b2c3d4)
@@ -117,6 +145,49 @@ domains/coffee/cold-brew-coffee: NOT conformant
   [status] unrecognized status 'archived' (expected draft|stable|deprecated, §5.4)
 ```
 
+## `audit`
+
+```bash
+pipeline audit
+```
+
+Runs `AuditConceptQuality` over every content concept in the vault (`MOC`/
+`Domain` types are skipped — they're structural, not knowledge to judge).
+For each: a free, no-LLM check first
+(`domain/text_quality.py::looks_like_garbled_table`) catches anything that's
+obviously a mangled table dump; everything else goes through
+`QualityAuditSkillPort.judge`, which asks a local model whether the body
+genuinely stands alone as useful — this is what catches a *grammatically
+fine but vacuous* fragment (e.g. "The following table represents a
+collection of data points...") that lexical heuristics alone can't tell
+apart from real prose. One LLM call per non-obviously-garbled concept, so
+this scales with vault size. Purely a report — nothing is deleted. Prints:
+
+```
+value-ranges  — unusually numeric-dense (may be a bare data dump)
+zero-values  — just restates that a data point has a given value
+```
+
+No-op (with a message) if nothing is flagged.
+
+## `delete <path>`
+
+```bash
+pipeline delete data-points.md
+pipeline delete data-points   # .md suffix optional
+```
+
+Removes one concept from the vault (`ConceptRepositoryPort.delete`) and its
+metadata/vector index entries, and appends a `delete` entry to the SQLite
+audit log. The actual cleanup action for anything `pipeline audit` flags —
+`audit` and `delete` are deliberately separate commands, so removal is
+always a distinct, explicit choice per concept rather than something `audit`
+does automatically. Does **not** rewrite other concepts' `## Related`
+sections that link to the deleted one — OKF §6 explicitly tolerates broken
+links, and rewriting arbitrary other files as a side effect of a delete
+would be a much bigger blast radius than the delete itself. Exits `1` if the
+concept doesn't exist.
+
 ## `index`
 
 ```bash
@@ -142,27 +213,92 @@ pipeline new-domain observability \
 ```
 
 Scaffolds a new `type: Domain` concept at `domains/<slug>.md`, appends a
-creation entry to `log.md`, and creates a placeholder eval-rubric file at
+creation entry to the audit log, and creates a placeholder eval-rubric file at
 `pipeline/evals/domains/<slug>.json` (a single `"placeholder"` rubric you're
 expected to replace with real, domain-specific quality criteria — see
 [Onboarding → Add or change a domain's quality bar](../onboarding.md#add-or-change-a-domains-quality-bar)).
 Fails with exit code `1` if the domain already exists. Doesn't link the new
-domain from `MOC.md` — that's a manual, curatorial step by design.
+domain from `Home.md` — that's a manual, curatorial step by design.
 
-## `search <query> [-k N]`
+## `search <query> [-k N] [--type T] [--since DATE] [--until DATE]`
 
 ```bash
 pipeline search "how long should cold brew steep" -k 3
+pipeline search "" --type Decision --since 2026-05-01 --until 2026-05-31
 ```
 
-Runs `SearchConcepts`: embeds the query and returns the `k` closest concepts
-(default `5`) by cosine similarity, most relevant first:
+Runs `SearchConcepts`. Pass `--type` (optionally with `--since`/`--until`,
+ISO dates) to try a deterministic structured match first — e.g. every
+`Decision` concept made in May — returned with `score=1.0`, skipping the
+rest of the pipeline once there are enough hits (`SEARCH_STRUCTURED_MIN_RESULTS`).
+Otherwise (or if the structured match comes up short): a two-stage hybrid
+search — semantic (vector) and lexical (SQLite FTS5) results fused via
+reciprocal rank fusion, then expanded/reranked through the concept link
+graph — returning the `k` closest concepts (default `5`), most relevant
+first. `score` is a fused rank-based number, not a raw cosine similarity —
+see [Architecture → Data flow → Search](../architecture/data-flow.md#search):
 
 ```
-0.812  domains/coffee/cold-brew-coffee
-0.391  domains/coffee/ideal-espresso-ratio
-0.203  domains/coffee/pourover-guide
+0.033  domains/coffee/cold-brew-coffee
+0.016  domains/coffee/ideal-espresso-ratio
+0.008  domains/coffee/pourover-guide
 ```
+
+## `categorize`
+
+```bash
+pipeline categorize
+```
+
+Backfills `## Categories` links for every concept that predates the Category
+ontology layer (`CategorizeConcepts`) — skips anything already categorized,
+without a `domain`, or of a structural type (`MOC`, `Domain`, `Source
+Document`, `Category` itself). Runs the same `CategoryClassificationSkillPort`
+classify-then-link logic `KnowledgeAgent` runs at ingest time, just across
+the whole vault in one pass. New concepts get categorized automatically
+during `pipeline ingest` — this command is only needed once, to catch up
+content ingested before the feature existed (or after adding it to an
+existing vault).
+
+## `lineage <concept-id> [--relation-type T] [--direction D] [--max-hops N]`
+
+```bash
+pipeline lineage decisions/new-pricing --relation-type supersedes
+```
+
+Runs `TraceLineage`: walks typed-relation edges (a Dataview-style
+`relation_type:: [[target]]` line in a concept's body — see CLAUDE.md's
+"Typed relations" section) up to `--max-hops` away (default `3`),
+`--direction` one of `outgoing`, `incoming`, or `both` (default). Prints
+every path found — the full chain, not just whether one exists — e.g. to
+answer "was this decision superseded, and by what, and was *that*
+superseded too."
+
+## `log [--limit N]`
+
+```bash
+pipeline log
+```
+
+Prints the pipeline's ingest audit trail (`BundleLogPort.list_entries()`) —
+one `create`/`merge`/`reject` entry per decision made during `ingest` or
+`new-domain`, newest first, up to `--limit` (default `20`). This is the
+structured, queryable replacement for the old `vault/log.md` (WIKI_SPEC.md
+§9): the pipeline stores it in SQLite instead of appending prose to the
+bundle, since it's pipeline governance history, not vault content. See
+[Architecture → Ports & adapters](../architecture/ports-and-adapters.md).
+
+## `links <concept-id>`
+
+```bash
+pipeline links domains/coffee/qubits
+```
+
+Prints the outgoing and incoming §6 links for one concept
+(`MetadataRepositoryPort.find_links`) — the cluster of related concepts
+around it, independent of `tags`. Outgoing links come straight from the
+concept's body; incoming links are everything in the vault that links back
+to it.
 
 ## `mcp-serve [--host] [--port] [--stateless/--stateful]`
 

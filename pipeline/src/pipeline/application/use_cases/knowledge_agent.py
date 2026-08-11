@@ -15,6 +15,9 @@ from pipeline.application.ports.concept_repository import ConceptRepositoryPort
 from pipeline.application.ports.embedding import EmbeddingPort
 from pipeline.application.ports.eval_rubrics_repository import EvalRubricsRepositoryPort
 from pipeline.application.ports.metadata_repository import MetadataRepositoryPort
+from pipeline.application.ports.skills.category_classification import (
+    CategoryClassificationSkillPort,
+)
 from pipeline.application.ports.skills.domain_classification import (
     DomainClassificationSkillPort,
 )
@@ -30,20 +33,24 @@ from pipeline.application.ports.skills.type_classification import (
 from pipeline.application.ports.vector_search import VectorSearchPort
 from pipeline.domain.agent import (
     AgentResult,
+    CategoryCandidate,
     CreateDecision,
     DomainCandidate,
     MergeDecision,
     RejectDecision,
+    RelatedConcept,
     RelatednessCandidate,
 )
 from pipeline.domain.concept import ConceptId
 from pipeline.domain.eval import DEFAULT_EVAL_THRESHOLD, aggregate_scores
-from pipeline.domain.linking import add_related_links
+from pipeline.domain.linking import add_category_links, add_related_links
 from pipeline.domain.raw_material import RawItem
 
 DEFAULT_DISAMBIGUATION_CONFIDENCE_THRESHOLD = 0.75
 DEFAULT_RELATEDNESS_MIN_SCORE = 0.5
+DEFAULT_CATEGORY_CONFIDENCE_THRESHOLD = 0.6
 DOMAIN_TYPE = "Domain"
+CATEGORY_TYPE = "Category"
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +64,7 @@ class KnowledgeAgent:
         disambiguation: EntityDisambiguationSkillPort,
         type_classification: TypeClassificationSkillPort,
         domain_classification: DomainClassificationSkillPort,
+        category_classification: CategoryClassificationSkillPort,
         quality_eval: QualityEvalSkillPort,
         relatedness: RelatednessSkillPort,
         eval_rubrics_repository: EvalRubricsRepositoryPort,
@@ -65,6 +73,7 @@ class KnowledgeAgent:
         disambiguation_confidence_threshold: float = DEFAULT_DISAMBIGUATION_CONFIDENCE_THRESHOLD,
         eval_threshold: float = DEFAULT_EVAL_THRESHOLD,
         relatedness_min_score: float = DEFAULT_RELATEDNESS_MIN_SCORE,
+        category_confidence_threshold: float = DEFAULT_CATEGORY_CONFIDENCE_THRESHOLD,
     ) -> None:
         self._extraction = extraction
         self._embedding = embedding
@@ -72,6 +81,7 @@ class KnowledgeAgent:
         self._disambiguation = disambiguation
         self._type_classification = type_classification
         self._domain_classification = domain_classification
+        self._category_classification = category_classification
         self._quality_eval = quality_eval
         self._relatedness = relatedness
         self._eval_rubrics_repository = eval_rubrics_repository
@@ -80,6 +90,7 @@ class KnowledgeAgent:
         self._threshold = disambiguation_confidence_threshold
         self._eval_threshold = eval_threshold
         self._relatedness_min_score = relatedness_min_score
+        self._category_confidence_threshold = category_confidence_threshold
 
     def run(self, raw: RawItem) -> AgentResult:
         drafts = self._extraction.extract(raw)
@@ -138,6 +149,10 @@ class KnowledgeAgent:
             final_domain = str(domain) if domain is not None and eval_result.passed else None
             related = self._judge_related(draft, candidates)
             body = add_related_links(draft.body, related)
+
+            category_links, new_categories = self._classify_categories(draft, final_domain)
+            body = add_category_links(body, category_links)
+
             resolved_draft = replace(
                 draft,
                 body=body,
@@ -148,7 +163,9 @@ class KnowledgeAgent:
                     eval=eval_result,
                 ),
             )
-            decisions.append(CreateDecision(concept=resolved_draft, related=related))
+            decisions.append(
+                CreateDecision(concept=resolved_draft, related=related, new_categories=new_categories)
+            )
 
         return AgentResult(decisions=decisions)
 
@@ -172,6 +189,36 @@ class KnowledgeAgent:
             for c in strong_candidates
         ]
         return self._relatedness.judge(draft, enriched).related
+
+    def _classify_categories(
+        self, draft, domain: str | None
+    ) -> tuple[list[RelatedConcept], list[str]]:
+        """Existing-category assignments (returned as `RelatedConcept`, ready
+        for `add_category_links`) plus any newly-proposed category titles
+        (left for `IngestRawMaterial` to materialize, since this use case
+        never writes). No domain means no scoped category vocabulary to
+        classify against, so categorization is skipped entirely."""
+        if domain is None:
+            return [], []
+
+        known_category_ids = self._metadata_repository.find_ids_by_type(
+            CATEGORY_TYPE, domain=domain
+        )
+        candidates = []
+        for cid in known_category_ids:
+            concept = self._concept_repository.load(ConceptId(cid))
+            candidates.append(CategoryCandidate(concept_id=concept.id, title=concept.frontmatter.title))
+
+        verdict = self._category_classification.classify(draft, candidates)
+        if verdict.confidence < self._category_confidence_threshold:
+            return [], []
+
+        titles_by_id = {c.concept_id: c.title for c in candidates}
+        links = [
+            RelatedConcept(concept_id=cid, title=titles_by_id.get(cid))
+            for cid in verdict.categories
+        ]
+        return links, verdict.new_categories
 
     def _classify_domain(self, draft) -> ConceptId | None:
         domain_ids = self._metadata_repository.find_ids_by_type(DOMAIN_TYPE)

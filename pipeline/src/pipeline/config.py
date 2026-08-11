@@ -72,6 +72,14 @@ class Settings:
     disambiguation_confidence_threshold: float
     eval_threshold: float
     relatedness_min_score: float
+    category_confidence_threshold: float
+    search_pool_k: int
+    search_graph_seed_k: int
+    search_graph_max_hops: int
+    search_graph_decay: float
+    search_graph_category_decay: float
+    search_rrf_k: int
+    search_structured_min_results: int
     log_level: str
     mcp_host: str
     mcp_port: int
@@ -108,6 +116,14 @@ class Settings:
             ),
             eval_threshold=_float_env("EVAL_THRESHOLD", 0.7),
             relatedness_min_score=_float_env("RELATEDNESS_MIN_SCORE", 0.5),
+            category_confidence_threshold=_float_env("CATEGORY_CONFIDENCE_THRESHOLD", 0.6),
+            search_pool_k=_int_env("SEARCH_POOL_K", 20),
+            search_graph_seed_k=_int_env("SEARCH_GRAPH_SEED_K", 5),
+            search_graph_max_hops=_int_env("SEARCH_GRAPH_MAX_HOPS", 2),
+            search_graph_decay=_float_env("SEARCH_GRAPH_DECAY", 0.5),
+            search_graph_category_decay=_float_env("SEARCH_GRAPH_CATEGORY_DECAY", 0.85),
+            search_rrf_k=_int_env("SEARCH_RRF_K", 60),
+            search_structured_min_results=_int_env("SEARCH_STRUCTURED_MIN_RESULTS", 3),
             log_level=os.environ.get("LOG_LEVEL", "INFO"),
             mcp_host=os.environ.get("MCP_HOST", "127.0.0.1"),
             mcp_port=_int_env("MCP_PORT", 8000),

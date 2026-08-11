@@ -11,6 +11,7 @@ from __future__ import annotations
 from pipeline.domain.agent import RelatedConcept
 
 _RELATED_HEADING = "## Related"
+_CATEGORIES_HEADING = "## Categories"
 
 
 def insert_before_related(body: str, addition: str) -> str:
@@ -46,6 +47,12 @@ def add_link_section(body: str, heading: str, links: list[RelatedConcept]) -> st
 def add_related_links(body: str, links: list[RelatedConcept]) -> str:
     """`add_link_section` under the `## Related` heading — see module docstring."""
     return add_link_section(body, _RELATED_HEADING, links)
+
+
+def add_category_links(body: str, links: list[RelatedConcept]) -> str:
+    """`add_link_section` under the `## Categories` heading — the Wikipedia-
+    style ontology's concept -> Category edges."""
+    return add_link_section(body, _CATEGORIES_HEADING, links)
 
 
 def _has_link(body: str, concept_id) -> bool:

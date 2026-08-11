@@ -20,6 +20,27 @@ CREATE TABLE IF NOT EXISTS links (
 
 CREATE INDEX IF NOT EXISTS idx_links_from ON links(from_id);
 
+-- Lexical search leg (hybrid search's stage 1, alongside vector search).
+-- Standalone table (not an external-content table tied to `concepts`'
+-- rowid, since `concepts.id` is a TEXT primary key) — simplest fit at this
+-- vault's scale.
+CREATE VIRTUAL TABLE IF NOT EXISTS concepts_fts USING fts5(id UNINDEXED, body);
+
+-- Typed relations (Dataview inline-field convention, e.g.
+-- `supersedes:: [[/decisions/old.md]]`) — a superset signal on top of
+-- `links`: every typed link also lands in `links`, but only the ones with
+-- semantic meaning land here too, enabling lineage/impact traversal
+-- (`find_relations`/`trace_lineage`) that plain untyped links can't answer.
+CREATE TABLE IF NOT EXISTS typed_links (
+    from_id TEXT NOT NULL,
+    to_id TEXT NOT NULL,
+    relation_type TEXT NOT NULL,
+    PRIMARY KEY (from_id, to_id, relation_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_typed_links_from ON typed_links(from_id, relation_type);
+CREATE INDEX IF NOT EXISTS idx_typed_links_to ON typed_links(to_id, relation_type);
+
 CREATE TABLE IF NOT EXISTS intake_items (
     id TEXT PRIMARY KEY,
     path TEXT,

@@ -4,6 +4,7 @@ SQLite, filesystem) get wired to the application's ports."""
 from __future__ import annotations
 
 import json
+from datetime import date
 
 import typer
 
@@ -17,6 +18,9 @@ from pipeline.adapters.filesystem.markdown_concept_repository import MarkdownCon
 from pipeline.adapters.filesystem.raw_material_repository import FilesystemRawMaterialRepository
 from pipeline.adapters.ollama.client import OllamaClient
 from pipeline.adapters.ollama.embedding import OllamaEmbedding
+from pipeline.adapters.ollama.skills.category_classification import (
+    OllamaCategoryClassificationSkill,
+)
 from pipeline.adapters.ollama.skills.domain_classification import (
     OllamaDomainClassificationSkill,
 )
@@ -38,6 +42,8 @@ from pipeline.adapters.sqlite.sqlite_bundle_log import SqliteBundleLog
 from pipeline.adapters.sqlite.sqlite_intake_repository import SqliteIntakeRepository
 from pipeline.adapters.sqlite.sqlite_metadata_repository import SqliteMetadataRepository
 from pipeline.application.use_cases.audit_concept_quality import AuditConceptQuality
+from pipeline.application.use_cases.categorize_concepts import CategorizeConcepts
+from pipeline.application.use_cases.category_materializer import CategoryMaterializer
 from pipeline.application.use_cases.index_concept import IndexConcept
 from pipeline.application.use_cases.ingest_raw_material import IngestRawMaterial
 from pipeline.application.use_cases.knowledge_agent import KnowledgeAgent
@@ -46,6 +52,7 @@ from pipeline.application.use_cases.prune_stale_intake import PruneStaleIntake
 from pipeline.application.use_cases.rebuild_index import RebuildIndex
 from pipeline.application.use_cases.scan_intake import ScanIntake
 from pipeline.application.use_cases.search_concepts import SearchConcepts
+from pipeline.application.use_cases.trace_lineage import TraceLineage
 from pipeline.application.use_cases.validate_concept import ValidateConcept
 from pipeline.config import Settings
 from pipeline.domain.concept import Concept, ConceptId, Frontmatter
@@ -91,6 +98,9 @@ class Container:
         self.domain_classification_skill = OllamaDomainClassificationSkill(
             ollama, settings.ollama_chat_model
         )
+        self.category_classification_skill = OllamaCategoryClassificationSkill(
+            ollama, settings.ollama_chat_model
+        )
         self.quality_eval_skill = OllamaQualityEvalSkill(ollama, settings.ollama_chat_model)
         self.quality_audit_skill = OllamaQualityAuditSkill(ollama, settings.ollama_chat_model)
         self.relatedness_skill = OllamaRelatednessSkill(
@@ -120,6 +130,7 @@ class Container:
             disambiguation=self.disambiguation_skill,
             type_classification=self.type_classification_skill,
             domain_classification=self.domain_classification_skill,
+            category_classification=self.category_classification_skill,
             quality_eval=self.quality_eval_skill,
             relatedness=self.relatedness_skill,
             eval_rubrics_repository=self.eval_rubrics_repository,
@@ -128,6 +139,7 @@ class Container:
             disambiguation_confidence_threshold=settings.disambiguation_confidence_threshold,
             eval_threshold=settings.eval_threshold,
             relatedness_min_score=settings.relatedness_min_score,
+            category_confidence_threshold=settings.category_confidence_threshold,
         )
         self.ingest_raw_material = IngestRawMaterial(
             raw_material_repository=self.raw_material_repository,
@@ -138,7 +150,30 @@ class Container:
         )
         self.validate_concept = ValidateConcept(self.schema_registry)
         self.rebuild_index = RebuildIndex(self.concept_repository, self.index_concept)
-        self.search_concepts = SearchConcepts(self.embedding, self.vector_search)
+        self.category_materializer = CategoryMaterializer(
+            self.concept_repository, self.index_concept, self.bundle_log
+        )
+        self.categorize_concepts = CategorizeConcepts(
+            concept_repository=self.concept_repository,
+            metadata_repository=self.metadata_repository,
+            category_classification=self.category_classification_skill,
+            category_materializer=self.category_materializer,
+            index_concept=self.index_concept,
+            category_confidence_threshold=settings.category_confidence_threshold,
+        )
+        self.search_concepts = SearchConcepts(
+            self.embedding,
+            self.vector_search,
+            self.metadata_repository,
+            pool_k=settings.search_pool_k,
+            graph_seed_k=settings.search_graph_seed_k,
+            graph_max_hops=settings.search_graph_max_hops,
+            graph_decay=settings.search_graph_decay,
+            graph_category_decay=settings.search_graph_category_decay,
+            rrf_k=settings.search_rrf_k,
+            structured_min_results=settings.search_structured_min_results,
+        )
+        self.trace_lineage = TraceLineage(self.metadata_repository)
         self.scan_intake = ScanIntake(self.scanner, self.intake_repository)
         self.prune_stale_intake = PruneStaleIntake(self.intake_repository)
         self.parse_source_documents = ParseSourceDocuments(
@@ -405,11 +440,59 @@ def links(concept_id: str) -> None:
 
 
 @app.command()
-def search(query: str, k: int = 5) -> None:
-    """Semantic search over indexed concepts."""
+def search(
+    query: str,
+    k: int = 5,
+    type: str = typer.Option(None, "--type", help="Structured prefilter: frontmatter type."),
+    since: str = typer.Option(None, "--since", help="Structured prefilter: ISO date, inclusive."),
+    until: str = typer.Option(None, "--until", help="Structured prefilter: ISO date, inclusive."),
+) -> None:
+    """Hybrid search over indexed concepts: vector + lexical (FTS5) fused via
+    reciprocal rank fusion, then expanded/reranked through the link graph.
+    Pass --type (optionally with --since/--until) to try a deterministic
+    structured match first, falling back to the hybrid pipeline if it comes
+    up short."""
     container = _container()
-    for match in container.search_concepts.run(query, k=k):
+    matches = container.search_concepts.run(
+        query,
+        k=k,
+        type=type,
+        since=date.fromisoformat(since) if since else None,
+        until=date.fromisoformat(until) if until else None,
+    )
+    for match in matches:
         typer.echo(f"{match.score:.3f}  {match.concept_id}")
+
+
+@app.command()
+def lineage(
+    concept_id: str,
+    relation_type: str = typer.Option(None, "--relation-type"),
+    direction: str = typer.Option("both", "--direction", help="outgoing, incoming, or both."),
+    max_hops: int = typer.Option(3, "--max-hops"),
+) -> None:
+    """Trace typed-relation chains from a concept (e.g. `supersedes` edges),
+    up to --max-hops away — the full path, not just reachability."""
+    container = _container()
+    paths = container.trace_lineage.run(
+        concept_id, relation_type=relation_type, direction=direction, max_hops=max_hops
+    )
+    if not paths:
+        typer.echo("No typed-relation paths found.")
+        return
+    for path in paths:
+        chain = " -> ".join(f"{link.relation_type}:{link.to_id}" for link in path)
+        typer.echo(f"{concept_id} -> {chain}")
+
+
+@app.command()
+def categorize() -> None:
+    """Backfill Category links for concepts that predate the ontology layer
+    (everything ingested before `pipeline categorize` existed) — skips
+    anything already categorized, domainless, or structural."""
+    container = _container()
+    count = container.categorize_concepts.run()
+    typer.echo(f"categorized {count} concept(s)")
 
 
 @app.command(name="mcp-serve")

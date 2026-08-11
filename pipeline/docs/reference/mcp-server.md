@@ -65,13 +65,19 @@ new shared state, make sure that state is thread-safe too.
 
 | Tool | Signature | Backed by | Notes |
 |---|---|---|---|
-| `search_wiki` | `(query: str, k: int = 5) -> list[dict]` | `SearchConcepts` use case | Returns `[{"concept_id": ..., "score": ...}, ...]`, most relevant first — same semantics as `pipeline search`. |
+| `search_wiki` | `(query: str, k: int = 5, concept_type: str \| None = None, since: str \| None = None, until: str \| None = None) -> list[dict]` | `SearchConcepts` use case | Hybrid search: vector + lexical (FTS5) results fused via reciprocal rank fusion, then expanded/reranked through the link graph. Pass `concept_type` (optionally with `since`/`until`, ISO dates) to try a deterministic structured match first. Returns `[{"concept_id": ..., "score": ...}, ...]`, most relevant first — same semantics as `pipeline search`. `score` is a fused rank-based number (or `1.0` for a structural match), not a raw 0–1 cosine similarity (see [Architecture → Data flow](../architecture/data-flow.md#search)). |
 | `get_concept` | `(concept_id: str) -> str` | `ConceptRepositoryPort.load` + `frontmatter_codec.render` | Returns the concept's full markdown — YAML frontmatter block plus body — exactly as it's stored in the vault. `concept_id` is the bundle-relative path without `.md` (e.g. `domains/coffee/cold-brew-coffee`). `ConceptId` rejects `..`/absolute/backslash-containing ids (and `MarkdownConceptRepository` re-checks containment after resolving symlinks) — a remote client can't use this to read files outside the vault. |
 | `list_concepts` | `(concept_type: str \| None = None) -> list[str]` | `MetadataRepositoryPort.find_ids_by_type` or `ConceptRepositoryPort.list` | Pass a `type` (e.g. `"Domain"`) to filter; omit it to list every concept id in the vault. |
 | `list_types` | `(domain: str \| None = None) -> list[str]` | `MetadataRepositoryPort.list_distinct_types` | Every distinct frontmatter `type` in use, optionally scoped to one domain id. |
+| `related_concepts` | `(concept_id: str) -> dict` | `MetadataRepositoryPort.find_links` | Returns `{"outgoing": [...], "incoming": [...]}` — the cluster of related concepts around one concept, independent of `tags`. Same semantics as `pipeline links`. Category links (`## Categories`) are ordinary §6 links, so a concept's Category shows up here too, alongside its other related concepts. |
+| `find_relations` | `(concept_id: str, relation_type: str \| None = None) -> dict` | `MetadataRepositoryPort.find_relations` | Typed relations for one concept — a Dataview-style `relation_type:: [[target]]` line, distinct from `related_concepts`' plain untyped links. Optionally filter to one `relation_type` (e.g. `"supersedes"`). |
+| `trace_lineage` | `(concept_id: str, relation_type: str \| None = None, direction: str = "both", max_hops: int = 3) -> list[list[dict]]` | `TraceLineage` use case | Every typed-relation path up to `max_hops` away — the full chain, not just reachability (e.g. decision → superseded_by → decision). Same semantics as `pipeline lineage`. |
+| `get_source` | `(concept_id: str) -> list[dict]` | `ConceptRepositoryPort` (resolves `frontmatter.sources[].resource`) | Resolves a concept's §5.1 `sources[]` straight to the referenced `vault/references/` document's full content — grounding an answer in the original source without a manual second `get_concept` call. |
+| `find_entity` | `(name: str, entity_type: str \| None = None) -> list[dict]` | `SearchConcepts` (structured-prefiltered) | Thin convenience over `search_wiki` scoped to `entity_type` (e.g. `"Person"`), for "who is X" style lookups. |
 
 Each tool's docstring is what the MCP client sees as its description — keep
-them in sync with this table if you change one.
+them in sync with this table if you change one. `find_relations`/`trace_lineage`/`get_source`/`find_entity`
+are, like every tool above, read-only.
 
 ## Resources
 
@@ -79,9 +85,9 @@ Static, read-only text resources for the vault's own navigation surfaces:
 
 | URI | Content |
 |---|---|
-| `okf://moc` | `vault/MOC.md` — the curated, thematic entry point |
+| `okf://moc` | `vault/Home.md` — the curated, thematic entry point |
 | `okf://index` | `vault/index.md` — the mechanical directory listing (OKF §8) |
-| `okf://log` | `vault/log.md` — the chronological update history (OKF §9) |
+| `okf://log` | The pipeline's SQLite ingest audit trail (create/merge/reject decisions), newest first — not `vault/log.md`; this bundle doesn't populate the OKF §9 file, see [CLAUDE.md → The vault](../../CLAUDE.md) |
 
 ## Health check
 

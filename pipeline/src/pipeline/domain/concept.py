@@ -135,13 +135,14 @@ class Concept:
     body: str
 
 
-NON_CONTENT_TYPES = {"MOC", "Domain", "Source Document"}
+NON_CONTENT_TYPES = {"MOC", "Domain", "Source Document", "Category"}
 """Structural/navigation types (curated link hubs, domain scaffolding,
-per-source reference stubs) that aren't ingestible content — excluded from
-semantic search/candidate matching (IndexConcept), entity-disambiguation, and
-quality auditing (AuditConceptQuality). Still tracked in the metadata store,
-just not treated as "knowledge" a standalone-quality judgment would make
-sense against."""
+per-source reference stubs, category hubs) that aren't ingestible content —
+excluded from semantic search/candidate matching (IndexConcept),
+entity-disambiguation, and quality auditing (AuditConceptQuality). Still
+tracked in the metadata store (and, for `Category`, in the link graph — see
+`SearchConcepts`' graph-expansion stage), just not treated as "knowledge" a
+standalone-quality judgment would make sense against."""
 
 
 @dataclass(frozen=True)
@@ -156,3 +157,16 @@ class LinkGraph:
     concept_id: str
     outgoing: list[str] = field(default_factory=list)
     incoming: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class TypedLink:
+    """One typed edge in the ontology graph — a Dataview-style inline field
+    (`relation_type:: [[target]]`) written directly in a concept's body, e.g.
+    `supersedes:: [[/decisions/old-decision]]`. Every typed link is also a
+    plain §6 link (it lands in `links` as well as `typed_links`), so it's
+    visible in Obsidian's native graph/backlinks with no plugin required."""
+
+    from_id: str
+    to_id: str
+    relation_type: str
