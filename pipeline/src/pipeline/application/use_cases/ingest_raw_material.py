@@ -31,14 +31,40 @@ _DERIVED_CONCEPTS_HEADING = "## Derived concepts"
 logger = logging.getLogger(__name__)
 
 
-def _add_source(frontmatter: Frontmatter, source_concept_id: str) -> Frontmatter:
+def _add_source(
+    frontmatter: Frontmatter, source_concept_id: str, hub: Concept | None = None
+) -> Frontmatter:
     """Adds a §5.1 `sources[]` entry pointing at the given reference-hub
     concept, deduped by resource — a concept can merge several chunks from
-    the same source, and must not accumulate duplicate identical entries."""
+    the same source, and must not accumulate duplicate identical entries.
+
+    Carries the hub's own credibility signals (`author`, `last_modified`)
+    onto the entry, so a consumer judging this concept can see them without
+    following the link. They were read from the document at parse time and
+    cannot be recovered later (ADR 0001). Whatever the hub doesn't have stays
+    `None`: absent means *unknown*, which is neutral, never low."""
     resource = f"/{source_concept_id}.md"
     if any(s.resource == resource for s in frontmatter.sources):
         return frontmatter
-    return replace(frontmatter, sources=[*frontmatter.sources, Source(resource=resource)])
+
+    author, last_modified = _credibility_signals(hub)
+    return replace(
+        frontmatter,
+        sources=[
+            *frontmatter.sources,
+            Source(resource=resource, author=author, last_modified=last_modified),
+        ],
+    )
+
+
+def _credibility_signals(hub: Concept | None) -> tuple[str | None, str | None]:
+    """The hub records the document's signals on its own `sources[]` entry
+    (see `ParseSourceDocuments._ensure_source_hub`). A hub predating that —
+    or one whose document declared nothing — yields empty signals."""
+    if hub is None or not hub.frontmatter.sources:
+        return None, None
+    origin = hub.frontmatter.sources[0]
+    return origin.author, origin.last_modified
 
 
 @dataclass(frozen=True)
@@ -108,6 +134,13 @@ class IngestRawMaterial:
             if raw.source_id
             else None
         )
+        # Loaded once per raw item, not per decision: its credibility signals
+        # are the same for every concept derived from this source.
+        source_hub = (
+            self._concept_repository.load(ConceptId(source_concept_id))
+            if source_concept_id
+            else None
+        )
 
         created: list[ConceptId] = []
         merged_into: list[ConceptId] = []
@@ -121,7 +154,10 @@ class IngestRawMaterial:
                 )
                 if source_concept_id:
                     concept = replace(
-                        concept, frontmatter=_add_source(concept.frontmatter, source_concept_id)
+                        concept,
+                        frontmatter=_add_source(
+                            concept.frontmatter, source_concept_id, source_hub
+                        ),
                     )
                 self._concept_repository.save(concept)
                 self._index_concept.run(concept)
@@ -140,7 +176,7 @@ class IngestRawMaterial:
             elif isinstance(decision, MergeDecision):
                 existing = self._concept_repository.load(decision.into)
                 merged_frontmatter = (
-                    _add_source(existing.frontmatter, source_concept_id)
+                    _add_source(existing.frontmatter, source_concept_id, source_hub)
                     if source_concept_id
                     else existing.frontmatter
                 )

@@ -8,6 +8,7 @@ import hashlib
 from pathlib import Path
 
 from docling.document_converter import DocumentConverter
+from pipeline.adapters.docling.source_metadata import read_document_metadata
 from pipeline.domain.source_document import ParsedDocument, ParsedImage
 
 _IMAGE_PLACEHOLDER = "<!-- image -->"
@@ -38,4 +39,8 @@ class DoclingDocumentParser:
             pil_image.save(image_path)
             images.append(ParsedImage(id=f"{source_stem}-{index}", path=str(image_path), anchor=anchor))
 
-        return ParsedDocument(text=markdown, images=images)
+        # Captured here or not at all: the signals are cheap while the document
+        # is open and expensive to reconstruct afterwards (ADR 0001).
+        return ParsedDocument(
+            text=markdown, images=images, metadata=read_document_metadata(path)
+        )

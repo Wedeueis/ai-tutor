@@ -581,3 +581,132 @@ def test_a_prerequisite_gets_no_reciprocal_backlink():
     use_case.run()
 
     assert concept_repository.load(target_id).body == "About water temperature."
+
+
+# --- credibility signals reaching derived concepts (RF1.5, ADR 0001) ------
+
+
+def _hub_with_signals(author=None, last_modified=None) -> Concept:
+    return Concept(
+        id=ConceptId("references/attention-is-all-you-need"),
+        frontmatter=Frontmatter(
+            type="Source Document",
+            title="Attention Is All You Need",
+            sources=[
+                Source(
+                    resource="raw/Attention Is All You Need.pdf",
+                    title="Attention Is All You Need",
+                    author=author,
+                    last_modified=last_modified,
+                )
+            ],
+        ),
+        body="Source document parsed from `raw/Attention Is All You Need.pdf`.",
+    )
+
+
+def test_a_derived_concept_carries_its_sources_credibility_signals():
+    """A consumer judging this concept should see the signals without having
+    to follow the link to the hub."""
+    hub = _hub_with_signals(author="Vaswani et al.", last_modified="2024-04-10")
+    raw = RawItem(id="chunk-1", content="Adam is an optimizer.", source_id="source-1")
+    draft = DraftConcept(
+        frontmatter=Frontmatter(type="Unclassified", title="Adam Optimizer"),
+        body="Adam is an optimizer.",
+        source_raw_id="chunk-1",
+    )
+    use_case, concept_repository, _, _ = _build(
+        [raw],
+        {"chunk-1": [draft]},
+        existing_concepts=[hub],
+        source_concepts={"source-1": str(hub.id)},
+    )
+
+    outcomes = use_case.run()
+
+    source = concept_repository.load(outcomes[0].created[0]).frontmatter.sources[0]
+    assert source.resource == f"/{hub.id}.md"
+    assert source.author == "Vaswani et al."
+    assert source.last_modified == "2024-04-10"
+
+
+def test_a_hub_with_no_signals_yields_a_concept_with_unknown_signals():
+    """Absent means unknown, which ADR 0001 requires to stay neutral — never a
+    fabricated author or date."""
+    hub = _hub_with_signals()
+    raw = RawItem(id="chunk-1", content="Adam is an optimizer.", source_id="source-1")
+    draft = DraftConcept(
+        frontmatter=Frontmatter(type="Unclassified", title="Adam Optimizer"),
+        body="Adam is an optimizer.",
+        source_raw_id="chunk-1",
+    )
+    use_case, concept_repository, _, _ = _build(
+        [raw],
+        {"chunk-1": [draft]},
+        existing_concepts=[hub],
+        source_concepts={"source-1": str(hub.id)},
+    )
+
+    outcomes = use_case.run()
+
+    source = concept_repository.load(outcomes[0].created[0]).frontmatter.sources[0]
+    assert source.author is None
+    assert source.last_modified is None
+
+
+def test_a_hub_predating_signal_capture_does_not_break_ingest():
+    """Hubs created before RF1.5 have no `sources[]` of their own. They must
+    still ingest — no later pass can recover their signals anyway."""
+    hub = Concept(
+        id=ConceptId("references/attention-is-all-you-need"),
+        frontmatter=Frontmatter(type="Source Document", title="Attention Is All You Need"),
+        body="Source document parsed from `raw/Attention Is All You Need.pdf`.",
+    )
+    raw = RawItem(id="chunk-1", content="Adam is an optimizer.", source_id="source-1")
+    draft = DraftConcept(
+        frontmatter=Frontmatter(type="Unclassified", title="Adam Optimizer"),
+        body="Adam is an optimizer.",
+        source_raw_id="chunk-1",
+    )
+    use_case, concept_repository, _, _ = _build(
+        [raw],
+        {"chunk-1": [draft]},
+        existing_concepts=[hub],
+        source_concepts={"source-1": str(hub.id)},
+    )
+
+    outcomes = use_case.run()
+
+    source = concept_repository.load(outcomes[0].created[0]).frontmatter.sources[0]
+    assert source == Source(resource=f"/{hub.id}.md")
+
+
+def test_no_credibility_score_is_ever_written():
+    """ADR 0001: the signals are recorded, a score never is. Guards against a
+    later change quietly adding one to the frontmatter."""
+    hub = _hub_with_signals(author="Vaswani et al.", last_modified="2024-04-10")
+    raw = RawItem(id="chunk-1", content="Adam is an optimizer.", source_id="source-1")
+    draft = DraftConcept(
+        frontmatter=Frontmatter(type="Unclassified", title="Adam Optimizer"),
+        body="Adam is an optimizer.",
+        source_raw_id="chunk-1",
+    )
+    use_case, concept_repository, _, _ = _build(
+        [raw],
+        {"chunk-1": [draft]},
+        existing_concepts=[hub],
+        source_concepts={"source-1": str(hub.id)},
+    )
+
+    outcomes = use_case.run()
+
+    source = concept_repository.load(outcomes[0].created[0]).frontmatter.sources[0]
+    assert set(vars(source)) == {
+        "resource",
+        "id",
+        "title",
+        "author",
+        "usage_count",
+        "last_modified",
+    }
+    assert source.usage_count is None  # episodic; lives in `tutor`, never here

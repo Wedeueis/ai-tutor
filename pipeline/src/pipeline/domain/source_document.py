@@ -17,6 +17,20 @@ class ParsedImage:
 
 
 @dataclass(frozen=True)
+class DocumentMetadata:
+    """The §5.1 credibility signals a source document carries about itself.
+
+    Both are optional and routinely absent — two of the four PDFs in this
+    vault declare no author at all. Absent means *unknown*, which ADR 0001
+    requires consumers to treat as neutral, never as low. `last_modified` is
+    `YYYY-MM-DD` per §5.1."""
+
+    author: str | None = None
+    last_modified: str | None = None
+
+
+@dataclass(frozen=True)
 class ParsedDocument:
     text: str
     images: list[ParsedImage] = field(default_factory=list)
+    metadata: DocumentMetadata = field(default_factory=DocumentMetadata)

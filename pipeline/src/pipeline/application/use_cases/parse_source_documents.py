@@ -20,9 +20,10 @@ from pipeline.application.ports.parsing import DocumentParsingPort
 from pipeline.application.ports.skills.image_captioning import ImageCaptioningSkillPort
 from pipeline.application.use_cases.index_concept import IndexConcept
 from pipeline.domain.chunking import DEFAULT_MAX_CHARS, chunk_markdown
-from pipeline.domain.concept import Concept, ConceptId, Frontmatter
+from pipeline.domain.concept import Concept, ConceptId, Frontmatter, Source
 from pipeline.domain.intake import IntakeItem, IntakeKind, IntakeState
 from pipeline.domain.slug import slugify
+from pipeline.domain.source_document import DocumentMetadata
 from pipeline.domain.text_quality import looks_like_garbled_table
 
 logger = logging.getLogger(__name__)
@@ -98,8 +99,11 @@ class ParseSourceDocuments:
             # domain/intake.py's extension-based classification); a pathless one
             # is a malformed row, not something to parse as empty.
             raise ValueError(f"source document {source.id} has no path")
-        self._ensure_source_hub(source)
+        # Parse first: the hub carries the document's credibility signals, and
+        # those only exist once it has been opened. A document that fails to
+        # parse now leaves no orphan hub behind either.
         parsed = self._parsing.parse(source.path)
+        self._ensure_source_hub(source, parsed.metadata)
 
         text = parsed.text
         for image in parsed.images:
@@ -134,13 +138,20 @@ class ParseSourceDocuments:
 
         return ParseOutcome(source_id=source.id, chunk_ids=chunk_ids, skipped=skipped)
 
-    def _ensure_source_hub(self, source: IntakeItem) -> None:
+    def _ensure_source_hub(self, source: IntakeItem, metadata: DocumentMetadata) -> None:
         """Creates a durable `references/` stub concept representing this
         source document, the first time it's parsed — idempotent across
         re-parses (checked via the same intake_item_concepts link chunks use
         to point at their concepts, reused here for source->hub). Every
         concept later derived from this source's chunks points its §5.1
-        `sources[]` back at it — see IngestRawMaterial."""
+        `sources[]` back at it — see IngestRawMaterial.
+
+        The hub carries the document's own credibility signals on its own
+        `sources[]` entry, pointing at the raw artifact. That entry is what
+        makes the hub self-describing, and it is where `IngestRawMaterial`
+        reads the signals it stamps onto every derived concept — so they are
+        captured once, at parse time, rather than re-derived per concept
+        (ADR 0001)."""
         if self._intake_repository.list_concepts_for(source.id):
             return
 
@@ -159,6 +170,14 @@ class ParseSourceDocuments:
                 type="Source Document",
                 title=title,
                 description=f"Source document ingested from raw/{filename}.",
+                sources=[
+                    Source(
+                        resource=f"raw/{filename}",
+                        title=title,
+                        author=metadata.author,
+                        last_modified=metadata.last_modified,
+                    )
+                ],
             ),
             body=f"Source document parsed from `raw/{filename}`.",
         )

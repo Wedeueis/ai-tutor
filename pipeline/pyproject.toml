@@ -13,7 +13,15 @@ dependencies = [
     "httpx>=0.28.1",
     "jsonschema>=4.26.0",
     "mcp>=2.0.0",
+    # Read source-document credibility signals (§5.1 author / last_modified),
+    # which Docling itself does not expose. All four already arrive as Docling
+    # transitives; declared here because `adapters/docling/source_metadata.py`
+    # imports them directly and a Docling upgrade could drop any of them.
+    "openpyxl>=3.1",
+    "pypdfium2>=4.30",
+    "python-docx>=1.1",
     "python-dotenv>=1.2.2",
+    "python-pptx>=1.0",
     "pyyaml>=6.0.3",
     "torch>=2.4",
     "torchvision>=0.28.0",
@@ -66,7 +74,17 @@ disallow_untyped_defs = true
 
 # Third-party packages without bundled type information.
 [[tool.mypy.overrides]]
-module = ["chromadb.*", "docling.*", "fpdf.*", "jsonschema.*", "yaml.*"]
+module = [
+    "chromadb.*",
+    "docling.*",
+    "docx.*",
+    "fpdf.*",
+    "jsonschema.*",
+    "openpyxl.*",
+    "pptx.*",
+    "pypdfium2.*",
+    "yaml.*",
+]
 ignore_missing_imports = true
 
 [tool.ruff]

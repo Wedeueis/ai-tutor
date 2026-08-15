@@ -4,7 +4,7 @@ from pipeline.application.use_cases.index_concept import IndexConcept
 from pipeline.application.use_cases.parse_source_documents import ParseSourceDocuments
 from pipeline.domain.concept import Concept, ConceptId, Frontmatter
 from pipeline.domain.intake import IntakeItem, IntakeKind, IntakeState
-from pipeline.domain.source_document import ParsedDocument, ParsedImage
+from pipeline.domain.source_document import DocumentMetadata, ParsedDocument, ParsedImage
 from tests.application.fakes import (
     FakeBundleLog,
     FakeConceptRepository,
@@ -203,3 +203,66 @@ def test_hub_id_avoids_collision_with_existing_concept():
     use_case.run()
 
     assert concept_repository.exists(ConceptId("references/report-2"))
+
+
+# --- credibility signals (RF1.5, ADR 0001) -------------------------------
+
+
+def test_the_hub_records_the_documents_credibility_signals(tmp_path):
+    """Captured at parse time or not at all — no later pass can recover an
+    author or a modification date once the document has been chunked."""
+    source = _source_item()
+    intake_repository = FakeIntakeRepository(items=[source])
+    parsing = FakeDocumentParsing(
+        {
+            "raw/report.pdf": ParsedDocument(
+                text="# Report",
+                metadata=DocumentMetadata(author="Ada Lovelace", last_modified="2025-03-14"),
+            )
+        }
+    )
+    use_case, concept_repository, _ = _build(intake_repository, parsing)
+
+    use_case.run()
+
+    hub = concept_repository.load(ConceptId("references/report"))
+    assert len(hub.frontmatter.sources) == 1
+    origin = hub.frontmatter.sources[0]
+    assert origin.resource == "raw/report.pdf"
+    assert origin.author == "Ada Lovelace"
+    assert origin.last_modified == "2025-03-14"
+
+
+def test_a_document_declaring_nothing_still_gets_a_hub_with_empty_signals():
+    """Most documents and every hand-dropped note carry no signals at all.
+    Absent must be unknown, not a reason to fail (ADR 0001)."""
+    source = _source_item()
+    intake_repository = FakeIntakeRepository(items=[source])
+    parsing = FakeDocumentParsing({"raw/report.pdf": ParsedDocument(text="# Report")})
+    use_case, concept_repository, _ = _build(intake_repository, parsing)
+
+    use_case.run()
+
+    origin = concept_repository.load(ConceptId("references/report")).frontmatter.sources[0]
+    assert origin.author is None
+    assert origin.last_modified is None
+
+
+def test_a_document_that_fails_to_parse_leaves_no_orphan_hub():
+    """The hub carries signals that only exist once the document is open, so
+    it is created after parsing — which also means a failed parse creates
+    nothing to clean up."""
+
+    class ExplodingParser:
+        def parse(self, path):
+            raise RuntimeError("corrupt PDF")
+
+    source = _source_item()
+    intake_repository = FakeIntakeRepository(items=[source])
+    use_case, concept_repository, _ = _build(intake_repository, ExplodingParser())
+
+    outcomes = use_case.run()
+
+    assert outcomes[0].errored == "corrupt PDF"
+    assert concept_repository.list() == []
+    assert intake_repository.get("source-1").state is IntakeState.ERROR
