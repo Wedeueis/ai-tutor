@@ -24,3 +24,6 @@ vault/.obsidian/
 # Editors / OS
 .DS_Store
 *.swp
+
+# Windows/WSL alternate-data-stream artefacts
+*:Zone.Identifier
