@@ -1,10 +1,10 @@
-"""CategoryClassificationSkillPort adapter: asks a local chat model which
+"""CategoryClassificationSkillPort adapter: asks the configured chat model which
 existing Categories (if any) a draft belongs to, or whether new ones should
 be minted — the finer-grained tier underneath `type: Domain`."""
 
 from __future__ import annotations
 
-from pipeline.adapters.ollama.client import OllamaClient
+from pipeline.application.ports.chat_model import ChatModelPort
 from pipeline.domain.agent import CategoryCandidate, CategoryClassificationVerdict, DraftConcept
 from pipeline.domain.concept import ConceptId
 
@@ -27,8 +27,8 @@ Respond with ONLY a JSON object: {{"categories": ["<existing category id>", ...]
 """
 
 
-class OllamaCategoryClassificationSkill:
-    def __init__(self, client: OllamaClient, model: str) -> None:
+class CategoryClassificationSkill:
+    def __init__(self, client: ChatModelPort, model: str) -> None:
         self._client = client
         self._model = model
 

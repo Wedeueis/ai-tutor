@@ -19,11 +19,15 @@ that's the trigger to introduce one; building it now would be speculative.
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+from pipeline.adapters.openrouter.client import DEFAULT_BASE_URL
 
 _PIPELINE_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -32,6 +36,43 @@ _PIPELINE_ROOT = Path(__file__).resolve().parent.parent.parent
 # shell, a container's env, or a CI secret. Safe to call even if the file
 # doesn't exist (a no-op).
 load_dotenv(_PIPELINE_ROOT / ".env")
+
+
+logger = logging.getLogger(__name__)
+
+
+class ChatProvider(str, Enum):
+    """Which service serves the LLM-backed skills.
+
+    `OLLAMA` is the default and keeps everything on the machine. `OPENROUTER`
+    reaches cloud models with better judgement (issue #19) at the cost of
+    sending vault content — raw notes, concept bodies, whatever a skill puts in
+    a prompt — to a third party. That is a deliberate, configured choice, never
+    a default.
+
+    Embeddings and vision are not affected either way: they stay local
+    unconditionally. Every vector in ChromaDB was produced by one embedding
+    model, so changing it invalidates the index rather than improving it."""
+
+    OLLAMA = "ollama"
+    OPENROUTER = "openrouter"
+
+DEFAULT_OPENROUTER_CHAT_MODEL = "anthropic/claude-sonnet-4.5"
+"""No default is safe on judgement alone: tool-calling and rubric-scoring
+reliability are per-model properties, verified by sampling, and a single
+passing run proves nothing (PRD v3 NFR3). Measure with
+`pipeline eval-prerequisites` before trusting whatever is set here."""
+
+
+def _chat_provider_env() -> ChatProvider:
+    raw = os.environ.get("CHAT_PROVIDER", ChatProvider.OLLAMA.value).strip().lower()
+    try:
+        return ChatProvider(raw)
+    except ValueError:
+        # Falling back to local would silently keep using the model the user
+        # was trying to move off. A typo here should stop the run.
+        valid = ", ".join(p.value for p in ChatProvider)
+        raise ValueError(f"CHAT_PROVIDER must be one of: {valid} (got {raw!r})") from None
 
 
 def _bool_env(name: str, default: bool) -> bool:
@@ -54,6 +95,12 @@ def _float_env(name: str, default: float) -> float:
 @dataclass(frozen=True)
 class Settings:
     vault_path: Path
+    chat_provider: ChatProvider
+    openrouter_api_key: str | None
+    openrouter_base_url: str
+    openrouter_chat_model: str
+    openrouter_relatedness_model: str
+    openrouter_max_tokens: int
     ollama_host: str
     ollama_chat_model: str
     ollama_relatedness_model: str
@@ -88,11 +135,49 @@ class Settings:
     mcp_stateless: bool
     mcp_auth_token: str | None
 
+    @property
+    def chat_model(self) -> str:
+        """The model every text skill runs on, resolved for the active
+        provider — so a skill asks for "the chat model" and never for
+        "the Ollama chat model"."""
+        if self.chat_provider is ChatProvider.OPENROUTER:
+            return self.openrouter_chat_model
+        return self.ollama_chat_model
+
+    @property
+    def relatedness_model(self) -> str:
+        """Relatedness has always been separately configurable; keeping that
+        per provider avoids a switch silently changing which model judges it."""
+        if self.chat_provider is ChatProvider.OPENROUTER:
+            return self.openrouter_relatedness_model
+        return self.ollama_relatedness_model
+
     @classmethod
     def from_env(cls) -> Settings:
         data_dir = _PIPELINE_ROOT / ".data"
         chat_model = os.environ.get("OLLAMA_CHAT_MODEL", "llama3.1:8b")
+        provider = _chat_provider_env()
+        openrouter_model = os.environ.get(
+            "OPENROUTER_CHAT_MODEL", DEFAULT_OPENROUTER_CHAT_MODEL
+        )
+        if provider is ChatProvider.OPENROUTER:
+            logger.warning(
+                "CHAT_PROVIDER=openrouter: prompts (raw notes, concept bodies) "
+                "will be sent to OpenRouter. Embeddings stay local."
+            )
         return cls(
+            chat_provider=provider,
+            openrouter_api_key=os.environ.get("OPENROUTER_API_KEY") or None,
+            openrouter_base_url=os.environ.get("OPENROUTER_BASE_URL", DEFAULT_BASE_URL),
+            openrouter_chat_model=openrouter_model,
+            openrouter_relatedness_model=os.environ.get(
+                "OPENROUTER_RELATEDNESS_MODEL", openrouter_model
+            ),
+            # Deliberately not sharing OLLAMA_MAX_PREDICT_TOKENS. That value
+            # caps a local model that might never emit an EOS; here the budget
+            # also has to cover a reasoning model's hidden tokens, and a
+            # too-small one returns empty content rather than truncated JSON.
+            openrouter_max_tokens=_int_env("OPENROUTER_MAX_TOKENS", 8192),
             vault_path=Path(
                 os.environ.get("VAULT_PATH", str(_PIPELINE_ROOT.parent / "vault"))
             ).resolve(),

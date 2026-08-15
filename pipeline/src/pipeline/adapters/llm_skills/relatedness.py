@@ -1,10 +1,10 @@
-"""RelatednessSkillPort adapter: asks a local chat model which existing
+"""RelatednessSkillPort adapter: asks the configured chat model which existing
 concepts (surfaced by vector search, already ruled out as the same entity)
 are genuinely related enough to link to."""
 
 from __future__ import annotations
 
-from pipeline.adapters.ollama.client import OllamaClient
+from pipeline.application.ports.chat_model import ChatModelPort
 from pipeline.domain.agent import (
     DraftConcept,
     RelatedConcept,
@@ -38,8 +38,8 @@ Use an empty list if none are genuinely related.
 """
 
 
-class OllamaRelatednessSkill:
-    def __init__(self, client: OllamaClient, model: str) -> None:
+class RelatednessSkill:
+    def __init__(self, client: ChatModelPort, model: str) -> None:
         self._client = client
         self._model = model
 

@@ -1,11 +1,11 @@
-"""QualityAuditSkillPort adapter: asks a local chat model whether an
+"""QualityAuditSkillPort adapter: asks the configured chat model whether an
 already-published concept stands alone as genuinely useful, or is a thin
 fragment of something larger (e.g. one row of a table split into its own
 concept) that reads as fine prose but conveys little real knowledge."""
 
 from __future__ import annotations
 
-from pipeline.adapters.ollama.client import OllamaClient
+from pipeline.application.ports.chat_model import ChatModelPort
 from pipeline.domain.agent import QualityAuditVerdict
 from pipeline.domain.concept import Concept
 
@@ -41,8 +41,8 @@ specific problem in the body if false>"}}
 """
 
 
-class OllamaQualityAuditSkill:
-    def __init__(self, client: OllamaClient, model: str) -> None:
+class QualityAuditSkill:
+    def __init__(self, client: ChatModelPort, model: str) -> None:
         self._client = client
         self._model = model
 

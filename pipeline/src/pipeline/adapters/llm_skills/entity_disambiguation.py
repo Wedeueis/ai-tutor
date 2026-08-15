@@ -1,9 +1,9 @@
-"""EntityDisambiguationSkillPort adapter: asks a local chat model whether a draft
+"""EntityDisambiguationSkillPort adapter: asks the configured chat model whether a draft
 concept is the same entity as one of the candidates surfaced by vector search."""
 
 from __future__ import annotations
 
-from pipeline.adapters.ollama.client import OllamaClient
+from pipeline.application.ports.chat_model import ChatModelPort
 from pipeline.domain.agent import CandidateMatch, DisambiguationVerdict, DraftConcept
 
 _PROMPT = """You maintain a personal knowledge-base wiki and must avoid duplicate entries.
@@ -23,8 +23,8 @@ Respond with ONLY a JSON object: {{"same_as": "<candidate id or null>", "confide
 """
 
 
-class OllamaEntityDisambiguationSkill:
-    def __init__(self, client: OllamaClient, model: str) -> None:
+class EntityDisambiguationSkill:
+    def __init__(self, client: ChatModelPort, model: str) -> None:
         self._client = client
         self._model = model
 

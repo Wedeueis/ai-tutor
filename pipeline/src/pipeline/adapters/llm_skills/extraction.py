@@ -1,10 +1,10 @@
-"""ExtractionSkillPort adapter: local chat model turns raw text into draft OKF
+"""ExtractionSkillPort adapter: the configured chat model turns raw text into draft OKF
 concepts. `type` is left as a placeholder — TypeClassificationSkillPort resolves
 it against the vault's existing type vocabulary downstream."""
 
 from __future__ import annotations
 
-from pipeline.adapters.ollama.client import OllamaClient
+from pipeline.application.ports.chat_model import ChatModelPort
 from pipeline.domain.agent import DraftConcept
 from pipeline.domain.concept import Frontmatter
 from pipeline.domain.raw_material import RawItem
@@ -29,8 +29,8 @@ Note:
 """
 
 
-class OllamaExtractionSkill:
-    def __init__(self, client: OllamaClient, model: str) -> None:
+class ExtractionSkill:
+    def __init__(self, client: ChatModelPort, model: str) -> None:
         self._client = client
         self._model = model
 

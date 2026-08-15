@@ -56,6 +56,11 @@ class PairOutcome:
     """Kept per rubric, not just rolled up. When precision misses the bar the
     next question is always *which criterion failed to discriminate*, and an
     average cannot answer it."""
+    error: str | None = None
+    """Set when the provider failed on this pair — a truncated reply, a
+    transient 5xx, a reasoning model returning empty content. Counted and
+    reported, never silently folded into the score: an errored pair is
+    *unmeasured*, and treating it as a negative would flatter precision."""
 
     @property
     def predicted_requires(self) -> bool:
@@ -72,9 +77,19 @@ class PrecisionReport:
     bar: float = DEFAULT_PRECISION_BAR
 
     @property
+    def errored(self) -> list[PairOutcome]:
+        return [o for o in self.outcomes if o.error is not None]
+
+    @property
+    def measured(self) -> list[PairOutcome]:
+        """Pairs the gate actually judged. Precision is over these — an errored
+        pair says nothing about the rubrics either way."""
+        return [o for o in self.outcomes if o.error is None]
+
+    @property
     def predicted(self) -> list[PairOutcome]:
         """Pairs the gate put in the `requires::` tier — precision's denominator."""
-        return [o for o in self.outcomes if o.predicted_requires]
+        return [o for o in self.measured if o.predicted_requires]
 
     @property
     def true_positives(self) -> list[PairOutcome]:
@@ -98,7 +113,7 @@ class PrecisionReport:
     @property
     def recall(self) -> float:
         """Reported for context only — never gated on (#14)."""
-        actual = [o for o in self.outcomes if o.pair.is_prerequisite]
+        actual = [o for o in self.measured if o.pair.is_prerequisite]
         if not actual:
             return 0.0
         return sum(1 for o in actual if o.predicted_requires) / len(actual)
@@ -130,7 +145,17 @@ class EvaluatePrerequisites:
         if not rubrics:
             raise ValueError(f"no '{PREREQUISITE_RUBRICS}' rubrics found in {self._evals_dir}")
 
-        outcomes = [self._judge(pair, rubrics) for pair in self._load_gold_set()]
+        outcomes = []
+        for pair in self._load_gold_set():
+            try:
+                outcomes.append(self._judge(pair, rubrics))
+            except Exception as exc:  # noqa: BLE001 - one flaky pair must not
+                # discard the other 29 judgements; a measurement run is long
+                # and expensive enough that aborting it wastes real money.
+                logger.warning("%s -> %s failed: %s", pair.source, pair.target, exc)
+                outcomes.append(
+                    PairOutcome(pair=pair, tier=None, average_score=0.0, error=str(exc))
+                )
         return PrecisionReport(outcomes=outcomes, bar=self._bar)
 
     def _judge(self, pair: GoldPair, rubrics: list) -> PairOutcome:

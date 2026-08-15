@@ -1,11 +1,11 @@
-"""QualityEvalSkillPort adapter: a local chat model scores a draft concept against
+"""QualityEvalSkillPort adapter: the configured chat model scores a draft concept against
 each rubric independently (one LLM call scores every rubric at once), given the
 original raw text for grounding checks. Pass/fail is decided elsewhere —
 deterministically, from the scores (see domain/eval.py's aggregate_scores)."""
 
 from __future__ import annotations
 
-from pipeline.adapters.ollama.client import OllamaClient
+from pipeline.application.ports.chat_model import ChatModelPort
 from pipeline.domain.agent import DraftConcept
 from pipeline.domain.eval import Rubric, RubricScore
 
@@ -34,8 +34,8 @@ Respond with ONLY a JSON array, one entry per rubric id above:
 """
 
 
-class OllamaQualityEvalSkill:
-    def __init__(self, client: OllamaClient, model: str) -> None:
+class QualityEvalSkill:
+    def __init__(self, client: ChatModelPort, model: str) -> None:
         self._client = client
         self._model = model
 

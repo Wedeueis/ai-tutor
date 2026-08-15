@@ -1,17 +1,17 @@
-"""PrerequisiteJudgementSkillPort adapter: a local chat model scores each
+"""PrerequisiteJudgementSkillPort adapter: the configured chat model scores each
 candidate edge against the prerequisite rubrics.
 
 **One call per candidate**, not one call for all of them. RF1.2 specifies a
 per-*edge* gate, and asking a small local model to return a nested
 target-by-rubric structure in a single response is the shape they get wrong
 most often. One call per candidate keeps the response in the same flat
-rubric-array shape `OllamaQualityEvalSkill` already proves out, at the cost of
+rubric-array shape `QualityEvalSkill` already proves out, at the cost of
 up to five extra calls per draft — cheap next to the precision this feature is
 graded on (RF1.3's 0.9 bar)."""
 
 from __future__ import annotations
 
-from pipeline.adapters.ollama.client import OllamaClient
+from pipeline.application.ports.chat_model import ChatModelPort
 from pipeline.domain.agent import DraftConcept
 from pipeline.domain.eval import Rubric, RubricScore
 from pipeline.domain.prerequisites import PrerequisiteAssessment, PrerequisiteCandidate
@@ -43,8 +43,8 @@ Respond with ONLY a JSON array, one entry per rubric id above:
 """
 
 
-class OllamaPrerequisiteJudgementSkill:
-    def __init__(self, client: OllamaClient, model: str) -> None:
+class PrerequisiteJudgementSkill:
+    def __init__(self, client: ChatModelPort, model: str) -> None:
         self._client = client
         self._model = model
 

@@ -16,34 +16,36 @@ from pipeline.adapters.eval_rubrics.json_file_eval_rubrics_repository import (
 from pipeline.adapters.filesystem.filesystem_scanner import FilesystemScanner
 from pipeline.adapters.filesystem.markdown_concept_repository import MarkdownConceptRepository
 from pipeline.adapters.filesystem.raw_material_repository import FilesystemRawMaterialRepository
+from pipeline.adapters.llm_skills.category_classification import (
+    CategoryClassificationSkill,
+)
+from pipeline.adapters.llm_skills.domain_classification import (
+    DomainClassificationSkill,
+)
+from pipeline.adapters.llm_skills.entity_disambiguation import (
+    EntityDisambiguationSkill,
+)
+from pipeline.adapters.llm_skills.extraction import ExtractionSkill
+from pipeline.adapters.llm_skills.prerequisite_judgement import (
+    PrerequisiteJudgementSkill,
+)
+from pipeline.adapters.llm_skills.quality_audit import QualityAuditSkill
+from pipeline.adapters.llm_skills.quality_eval import QualityEvalSkill
+from pipeline.adapters.llm_skills.relatedness import RelatednessSkill
+from pipeline.adapters.llm_skills.type_classification import (
+    TypeClassificationSkill,
+)
 from pipeline.adapters.ollama.client import OllamaClient
 from pipeline.adapters.ollama.embedding import OllamaEmbedding
-from pipeline.adapters.ollama.skills.category_classification import (
-    OllamaCategoryClassificationSkill,
-)
-from pipeline.adapters.ollama.skills.domain_classification import (
-    OllamaDomainClassificationSkill,
-)
-from pipeline.adapters.ollama.skills.entity_disambiguation import (
-    OllamaEntityDisambiguationSkill,
-)
-from pipeline.adapters.ollama.skills.extraction import OllamaExtractionSkill
 from pipeline.adapters.ollama.skills.image_captioning import OllamaImageCaptioningSkill
-from pipeline.adapters.ollama.skills.prerequisite_judgement import (
-    OllamaPrerequisiteJudgementSkill,
-)
-from pipeline.adapters.ollama.skills.quality_audit import OllamaQualityAuditSkill
-from pipeline.adapters.ollama.skills.quality_eval import OllamaQualityEvalSkill
-from pipeline.adapters.ollama.skills.relatedness import OllamaRelatednessSkill
-from pipeline.adapters.ollama.skills.type_classification import (
-    OllamaTypeClassificationSkill,
-)
+from pipeline.adapters.openrouter.client import OpenRouterClient
 from pipeline.adapters.schema_registry.json_file_schema_registry import (
     JsonFileSchemaRegistry,
 )
 from pipeline.adapters.sqlite.sqlite_bundle_log import SqliteBundleLog
 from pipeline.adapters.sqlite.sqlite_intake_repository import SqliteIntakeRepository
 from pipeline.adapters.sqlite.sqlite_metadata_repository import SqliteMetadataRepository
+from pipeline.application.ports.chat_model import ChatModelPort
 from pipeline.application.use_cases.audit_concept_quality import AuditConceptQuality
 from pipeline.application.use_cases.categorize_concepts import CategorizeConcepts
 from pipeline.application.use_cases.category_materializer import CategoryMaterializer
@@ -58,12 +60,27 @@ from pipeline.application.use_cases.scan_intake import ScanIntake
 from pipeline.application.use_cases.search_concepts import SearchConcepts
 from pipeline.application.use_cases.trace_lineage import TraceLineage
 from pipeline.application.use_cases.validate_concept import ValidateConcept
-from pipeline.config import Settings
+from pipeline.config import ChatProvider, Settings
 from pipeline.domain.concept import Concept, ConceptId, Frontmatter
 from pipeline.domain.intake import IntakeKind, IntakeState
 from pipeline.logging_config import configure_logging
 
 app = typer.Typer(help="Local-only ingestion + attester pipeline for the OKF vault.")
+
+
+def _chat_client(settings: Settings, ollama: OllamaClient) -> ChatModelPort:
+    """Resolves the configured provider. `ollama` is passed in rather than
+    rebuilt so the local path shares one client with embeddings and vision."""
+    if settings.chat_provider is ChatProvider.OPENROUTER:
+        return OpenRouterClient(
+            api_key=settings.openrouter_api_key or "",
+            base_url=settings.openrouter_base_url,
+            timeout=settings.ollama_timeout_seconds,
+            max_tokens=settings.openrouter_max_tokens,
+            max_retries=settings.ollama_max_retries,
+            retry_backoff_seconds=settings.ollama_retry_backoff_seconds,
+        )
+    return ollama
 
 
 class Container:
@@ -91,27 +108,35 @@ class Container:
             max_retries=settings.ollama_max_retries,
             retry_backoff_seconds=settings.ollama_retry_backoff_seconds,
         )
+        # The provider seam (PRD v3 NFR1, issue #19). Only *text* skills move:
+        # embeddings stay on `ollama` unconditionally, because every vector in
+        # ChromaDB came from one embedding model and changing it invalidates
+        # the index rather than improving it. Vision (image captioning) stays
+        # local too — it is cheap, and it would otherwise ship page images of
+        # every parsed PDF off the machine.
+        chat: ChatModelPort = _chat_client(settings, ollama)
+
         self.embedding = OllamaEmbedding(ollama, settings.ollama_embed_model)
-        self.extraction_skill = OllamaExtractionSkill(ollama, settings.ollama_chat_model)
-        self.disambiguation_skill = OllamaEntityDisambiguationSkill(
-            ollama, settings.ollama_chat_model
+        self.extraction_skill = ExtractionSkill(chat, settings.chat_model)
+        self.disambiguation_skill = EntityDisambiguationSkill(
+            chat, settings.chat_model
         )
-        self.type_classification_skill = OllamaTypeClassificationSkill(
-            ollama, settings.ollama_chat_model
+        self.type_classification_skill = TypeClassificationSkill(
+            chat, settings.chat_model
         )
-        self.domain_classification_skill = OllamaDomainClassificationSkill(
-            ollama, settings.ollama_chat_model
+        self.domain_classification_skill = DomainClassificationSkill(
+            chat, settings.chat_model
         )
-        self.category_classification_skill = OllamaCategoryClassificationSkill(
-            ollama, settings.ollama_chat_model
+        self.category_classification_skill = CategoryClassificationSkill(
+            chat, settings.chat_model
         )
-        self.quality_eval_skill = OllamaQualityEvalSkill(ollama, settings.ollama_chat_model)
-        self.quality_audit_skill = OllamaQualityAuditSkill(ollama, settings.ollama_chat_model)
-        self.relatedness_skill = OllamaRelatednessSkill(
-            ollama, settings.ollama_relatedness_model
+        self.quality_eval_skill = QualityEvalSkill(chat, settings.chat_model)
+        self.quality_audit_skill = QualityAuditSkill(chat, settings.chat_model)
+        self.relatedness_skill = RelatednessSkill(
+            chat, settings.relatedness_model
         )
-        self.prerequisite_judgement_skill = OllamaPrerequisiteJudgementSkill(
-            ollama, settings.ollama_chat_model
+        self.prerequisite_judgement_skill = PrerequisiteJudgementSkill(
+            chat, settings.chat_model
         )
         self.image_captioning_skill = OllamaImageCaptioningSkill(
             ollama, settings.ollama_vision_model
@@ -554,10 +579,10 @@ def eval_prerequisites(
     report = container.evaluate_prerequisites.run()
 
     for outcome in report.outcomes:
-        is_failure = not outcome.correct
+        is_failure = not outcome.correct and outcome.error is None
         if not (verbose or is_failure):
             continue
-        marker = "FAIL" if is_failure else "ok  "
+        marker = "ERR " if outcome.error else ("FAIL" if is_failure else "ok  ")
         tier = outcome.tier.value if outcome.tier else "(no edge)"
         expected = "requires" if outcome.pair.is_prerequisite else "not-a-prerequisite"
         typer.echo(
@@ -566,7 +591,17 @@ def eval_prerequisites(
         )
 
     typer.echo("")
+    if report.errored:
+        typer.echo("")
+        for outcome in report.errored:
+            typer.echo(
+                f"ERR   {outcome.pair.source} -> {outcome.pair.target}\n"
+                f"        {outcome.error}"
+            )
+
     typer.echo(f"pairs               {len(report.outcomes)}")
+    typer.echo(f"measured            {len(report.measured)}  "
+               f"({len(report.errored)} provider error(s), excluded)")
     typer.echo(f"emitted as requires {len(report.predicted)}")
     typer.echo(f"false positives     {len(report.false_positives)}")
     typer.echo(f"precision           {report.precision:.3f}  (bar {report.bar:.2f})")

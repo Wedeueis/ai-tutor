@@ -3,7 +3,7 @@ vault's existing type vocabulary, via a local chat model."""
 
 from __future__ import annotations
 
-from pipeline.adapters.ollama.client import OllamaClient
+from pipeline.application.ports.chat_model import ChatModelPort
 from pipeline.domain.agent import DraftConcept, TypeClassificationVerdict
 
 _PROMPT = """You maintain a personal knowledge-base wiki that uses a `type` field
@@ -22,8 +22,8 @@ Respond with ONLY a JSON object: {{"resolved_type": "<type name>", "is_new_type"
 """
 
 
-class OllamaTypeClassificationSkill:
-    def __init__(self, client: OllamaClient, model: str) -> None:
+class TypeClassificationSkill:
+    def __init__(self, client: ChatModelPort, model: str) -> None:
         self._client = client
         self._model = model
 
