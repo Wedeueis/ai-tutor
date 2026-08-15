@@ -29,6 +29,9 @@ from pipeline.adapters.ollama.skills.entity_disambiguation import (
 )
 from pipeline.adapters.ollama.skills.extraction import OllamaExtractionSkill
 from pipeline.adapters.ollama.skills.image_captioning import OllamaImageCaptioningSkill
+from pipeline.adapters.ollama.skills.prerequisite_judgement import (
+    OllamaPrerequisiteJudgementSkill,
+)
 from pipeline.adapters.ollama.skills.quality_audit import OllamaQualityAuditSkill
 from pipeline.adapters.ollama.skills.quality_eval import OllamaQualityEvalSkill
 from pipeline.adapters.ollama.skills.relatedness import OllamaRelatednessSkill
@@ -106,6 +109,9 @@ class Container:
         self.relatedness_skill = OllamaRelatednessSkill(
             ollama, settings.ollama_relatedness_model
         )
+        self.prerequisite_judgement_skill = OllamaPrerequisiteJudgementSkill(
+            ollama, settings.ollama_chat_model
+        )
         self.image_captioning_skill = OllamaImageCaptioningSkill(
             ollama, settings.ollama_vision_model
         )
@@ -133,6 +139,7 @@ class Container:
             category_classification=self.category_classification_skill,
             quality_eval=self.quality_eval_skill,
             relatedness=self.relatedness_skill,
+            prerequisite_judgement=self.prerequisite_judgement_skill,
             eval_rubrics_repository=self.eval_rubrics_repository,
             metadata_repository=self.metadata_repository,
             concept_repository=self.concept_repository,
@@ -140,6 +147,8 @@ class Container:
             eval_threshold=settings.eval_threshold,
             relatedness_min_score=settings.relatedness_min_score,
             category_confidence_threshold=settings.category_confidence_threshold,
+            prerequisite_threshold=settings.prerequisite_threshold,
+            prerequisite_candidate_k=settings.prerequisite_candidate_k,
         )
         self.ingest_raw_material = IngestRawMaterial(
             raw_material_repository=self.raw_material_repository,

@@ -19,6 +19,7 @@ from tests.application.fakes import (
     FakeEvalRubricsRepository,
     FakeExtractionSkill,
     FakeMetadataRepository,
+    FakePrerequisiteJudgementSkill,
     FakeQualityEvalSkill,
     FakeRelatednessSkill,
     FakeTypeClassificationSkill,
@@ -53,6 +54,8 @@ def _agent(
     relatedness_verdict=None,
     relatedness_min_score=None,
     category_verdict=None,
+    prerequisite_skill=None,
+    prerequisite_rubrics=None,
 ):
     kwargs = {}
     if relatedness_min_score is not None:
@@ -69,8 +72,10 @@ def _agent(
         category_classification=FakeCategoryClassificationSkill(category_verdict),
         quality_eval=FakeQualityEvalSkill(scores),
         relatedness=FakeRelatednessSkill(relatedness_verdict),
+        prerequisite_judgement=prerequisite_skill or FakePrerequisiteJudgementSkill(),
         eval_rubrics_repository=eval_rubrics_repository or FakeEvalRubricsRepository(
-            base_rubrics=[RUBRIC]
+            base_rubrics=[RUBRIC],
+            named_rubrics={"prerequisites": prerequisite_rubrics or []},
         ),
         metadata_repository=FakeMetadataRepository(
             known_types=known_types or ["Playbook"],
@@ -225,6 +230,7 @@ def test_related_but_not_merged_candidate_gets_linked_into_body():
                 related=[RelatedConcept(concept_id=other_id, title="Qubits", reason="same field")]
             )
         ),
+        prerequisite_judgement=FakePrerequisiteJudgementSkill(),
         eval_rubrics_repository=FakeEvalRubricsRepository(base_rubrics=[RUBRIC]),
         metadata_repository=FakeMetadataRepository(known_types=["Playbook"]),
         concept_repository=concept_repository,
@@ -416,6 +422,7 @@ def test_eval_rubrics_fall_back_to_base_when_domain_has_none():
         category_classification=FakeCategoryClassificationSkill(),
         quality_eval=CapturingQualityEval(),
         relatedness=FakeRelatednessSkill(),
+        prerequisite_judgement=FakePrerequisiteJudgementSkill(),
         eval_rubrics_repository=FakeEvalRubricsRepository(base_rubrics=[base_rubric]),
         metadata_repository=FakeMetadataRepository(domain_ids=[str(domain_id)]),
         concept_repository=concept_repository,
@@ -458,6 +465,7 @@ def test_eval_rubrics_use_domain_specific_file_when_present():
         category_classification=FakeCategoryClassificationSkill(),
         quality_eval=CapturingQualityEval(),
         relatedness=FakeRelatednessSkill(),
+        prerequisite_judgement=FakePrerequisiteJudgementSkill(),
         eval_rubrics_repository=FakeEvalRubricsRepository(
             rubrics_by_domain={str(domain_id): [domain_rubric]}
         ),
@@ -468,3 +476,144 @@ def test_eval_rubrics_use_domain_specific_file_when_present():
     agent.run(raw)
 
     assert captured["rubrics"] == [domain_rubric]
+
+
+# --- prerequisites (RF1.1, RF1.2) ----------------------------------------
+
+PREREQ_RUBRICS = [Rubric("blocks_comprehension", RubricContent("Must be required."))]
+
+
+def _prereq_agent(candidates, assessments_by_target, **kwargs):
+    from tests.application.fakes import FakePrerequisiteJudgementSkill
+
+    skill = FakePrerequisiteJudgementSkill(assessments_by_target)
+    agent = _agent(
+        {"r1": [_draft("r1")]},
+        DisambiguationVerdict(same_as=None, confidence=0.0),
+        candidates=candidates,
+        prerequisite_skill=skill,
+        prerequisite_rubrics=PREREQ_RUBRICS,
+        **kwargs,
+    )
+    return agent, skill
+
+
+def _repo_with(*concepts) -> FakeConceptRepository:
+    repo = FakeConceptRepository()
+    for concept in concepts:
+        repo.save(concept)
+    return repo
+
+
+def _concept(concept_id: str, concept_type: str = "Playbook", title: str | None = None):
+    return Concept(
+        id=ConceptId(concept_id),
+        frontmatter=Frontmatter(type=concept_type, title=title or concept_id),
+        body="",
+    )
+
+
+def test_a_confident_prerequisite_is_written_into_the_body_as_a_requires_edge():
+    target = ConceptId("water-temperature")
+    agent, _ = _prereq_agent(
+        candidates=[CandidateMatch(concept_id=target, score=0.6)],
+        assessments_by_target={"water-temperature": [RubricScore("blocks_comprehension", 0.9)]},
+        concept_repository=_repo_with(_concept("water-temperature")),
+    )
+
+    decision = agent.run(RawItem(id="r1", content="...")).decisions[0]
+
+    assert "requires:: [[/water-temperature]]" in decision.concept.body
+    assert [str(e.target_id) for e in decision.prerequisites] == ["water-temperature"]
+
+
+def test_an_uncertain_prerequisite_lands_in_the_inert_may_require_tier():
+    target = ConceptId("latte-art")
+    agent, _ = _prereq_agent(
+        candidates=[CandidateMatch(concept_id=target, score=0.6)],
+        assessments_by_target={"latte-art": [RubricScore("blocks_comprehension", 0.2)]},
+        concept_repository=_repo_with(_concept("latte-art")),
+    )
+
+    decision = agent.run(RawItem(id="r1", content="...")).decisions[0]
+
+    assert "may_require:: [[/latte-art]]" in decision.concept.body
+    assert "requires:: [[/latte-art]]" not in decision.concept.body
+
+
+def test_prerequisites_are_emitted_when_the_draft_has_no_domain():
+    """The common case in this vault — RF1.1 requires it to work anyway."""
+    target = ConceptId("water-temperature")
+    agent, _ = _prereq_agent(
+        candidates=[CandidateMatch(concept_id=target, score=0.6)],
+        assessments_by_target={"water-temperature": [RubricScore("blocks_comprehension", 0.9)]},
+        concept_repository=_repo_with(_concept("water-temperature")),
+        domain_verdict=NO_DOMAIN,
+    )
+
+    decision = agent.run(RawItem(id="r1", content="...")).decisions[0]
+
+    assert decision.concept.frontmatter.domain is None
+    assert "requires:: [[/water-temperature]]" in decision.concept.body
+
+
+def test_structural_concepts_are_never_offered_as_prerequisite_candidates():
+    """A Category or MOC organises knowledge rather than teaching it, so
+    nothing can require one."""
+    agent, skill = _prereq_agent(
+        candidates=[
+            CandidateMatch(concept_id=ConceptId("brewing-methods"), score=0.9),
+            CandidateMatch(concept_id=ConceptId("water-temperature"), score=0.6),
+        ],
+        assessments_by_target={"water-temperature": [RubricScore("blocks_comprehension", 0.9)]},
+        concept_repository=_repo_with(
+            _concept("brewing-methods", "Category"), _concept("water-temperature")
+        ),
+    )
+
+    agent.run(RawItem(id="r1", content="..."))
+
+    assert skill.calls[0][1] == ["water-temperature"]
+
+
+def test_no_prerequisite_rubrics_means_no_emission_rather_than_a_crash():
+    agent = _agent(
+        {"r1": [_draft("r1")]},
+        DisambiguationVerdict(same_as=None, confidence=0.0),
+        candidates=[CandidateMatch(concept_id=ConceptId("water-temperature"), score=0.6)],
+        concept_repository=_repo_with(_concept("water-temperature")),
+        prerequisite_rubrics=[],
+    )
+
+    decision = agent.run(RawItem(id="r1", content="...")).decisions[0]
+
+    assert decision.prerequisites == []
+    assert "requires::" not in decision.concept.body
+
+
+def test_a_candidate_the_skill_omits_produces_no_edge():
+    agent, _ = _prereq_agent(
+        candidates=[CandidateMatch(concept_id=ConceptId("latte-art"), score=0.6)],
+        assessments_by_target={},
+        concept_repository=_repo_with(_concept("latte-art")),
+    )
+
+    decision = agent.run(RawItem(id="r1", content="...")).decisions[0]
+
+    assert decision.prerequisites == []
+
+
+def test_prerequisite_candidates_are_not_filtered_by_the_relatedness_min_score():
+    """Relatedness drops weak matches to avoid post-hoc rationalisation; a
+    prerequisite is a different judgement and gets its own candidates."""
+    agent, skill = _prereq_agent(
+        candidates=[CandidateMatch(concept_id=ConceptId("water-temperature"), score=0.1)],
+        assessments_by_target={"water-temperature": [RubricScore("blocks_comprehension", 0.9)]},
+        concept_repository=_repo_with(_concept("water-temperature")),
+        relatedness_min_score=0.5,
+    )
+
+    decision = agent.run(RawItem(id="r1", content="...")).decisions[0]
+
+    assert skill.calls[0][1] == ["water-temperature"]
+    assert "requires:: [[/water-temperature]]" in decision.concept.body

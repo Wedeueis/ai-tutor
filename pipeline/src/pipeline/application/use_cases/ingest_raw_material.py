@@ -22,6 +22,7 @@ from pipeline.application.use_cases.knowledge_agent import KnowledgeAgent
 from pipeline.domain.agent import CreateDecision, MergeDecision, RejectDecision, RelatedConcept
 from pipeline.domain.concept import Concept, ConceptId, Frontmatter, Source
 from pipeline.domain.linking import add_link_section, add_related_links, insert_before_related
+from pipeline.domain.prerequisites import PrerequisiteEdge
 from pipeline.domain.raw_material import RawItem
 from pipeline.domain.slug import slugify
 
@@ -132,6 +133,7 @@ class IngestRawMaterial:
                 )
                 created.append(concept.id)
                 self._raw_material_repository.link_concept(raw.id, str(concept.id))
+                self._log_prerequisites(concept, decision.prerequisites, raw.id)
                 self._write_reciprocal_backlinks(concept, decision.related, raw.id)
                 if source_concept_id:
                     self._update_source_hub(concept, source_concept_id, raw.id)
@@ -171,6 +173,26 @@ class IngestRawMaterial:
         return IngestOutcome(
             raw_id=raw.id, created=created, merged_into=merged_into, rejected=rejected
         )
+
+    def _log_prerequisites(
+        self, concept: Concept, prerequisites: list[PrerequisiteEdge], raw_id: str
+    ) -> None:
+        """Records each emitted edge in the bundle log. The edge itself is
+        already in `concept.body` (KnowledgeAgent wove it in) and needs no
+        write here — but the *rationale* does: it is the only place a human
+        reviewing a `may_require::` edge can find out why the gate demoted it,
+        since the body deliberately carries the bare line and nothing else."""
+        for edge in prerequisites:
+            self._bundle_log.append(
+                action="require",
+                concept_id=str(concept.id),
+                raw_id=raw_id,
+                message=(
+                    f"{edge.relation_type}: {concept.frontmatter.title or concept.id} -> "
+                    f"{edge.target_id} (score {edge.eval.average_score:.2f})"
+                    + (f" — {edge.rationale}" if edge.rationale else "")
+                ),
+            )
 
     def _write_reciprocal_backlinks(
         self, concept: Concept, related: list[RelatedConcept], raw_id: str

@@ -1,0 +1,42 @@
+[
+  {
+    "rubric_id": "blocks_comprehension",
+    "rubric_content": {
+      "text_property": "A learner who does not already understand the TARGET would be unable to follow the SOURCE — not merely less enriched by it. If the source still reads coherently without the target, and knowing the target would only add context, depth, or interesting connection, this fails. 'Would help' is not 'is required'."
+    },
+    "description": "The core prerequisite test: necessity, not enrichment.",
+    "type": "CONTENT_QUALITY"
+  },
+  {
+    "rubric_id": "target_is_more_foundational",
+    "rubric_content": {
+      "text_property": "The dependency runs from source to target and not the other way around: the target is the more basic, more general, or earlier-learned of the two. If the target is better understood as an application, extension, or special case of the source, this fails — the edge is pointing backwards."
+    },
+    "description": "Direction. A reversed edge is worse than a missing one.",
+    "type": "CONTENT_QUALITY"
+  },
+  {
+    "rubric_id": "load_bearing_in_the_body",
+    "rubric_content": {
+      "text_property": "The source's actual body leans on the target — it uses the target's terminology, mechanism, notation, or result as something already settled. Sharing a topic, a domain, or a set of tags is not enough; the dependency must be visible in what the source text actually does."
+    },
+    "description": "Grounds the judgement in the text rather than in topical proximity.",
+    "type": "CONTENT_QUALITY"
+  },
+  {
+    "rubric_id": "not_merely_related",
+    "rubric_content": {
+      "text_property": "The two concepts are not siblings, alternatives, competitors, examples of one another, or parts of a common whole. Those relationships are genuinely useful and belong in the plain link graph as 'related' — but a learner can study either one first, which is exactly what a prerequisite rules out."
+    },
+    "description": "Separates prerequisite from the much larger class of related.",
+    "type": "CONTENT_QUALITY"
+  },
+  {
+    "rubric_id": "distinct_concepts",
+    "rubric_content": {
+      "text_property": "The source and target are genuinely different concepts, not two names, spellings, or framings of the same one. A concept cannot be its own prerequisite, and a near-duplicate pair is a merge candidate rather than an edge."
+    },
+    "description": "Guards against the near-duplicate pairs vector search surfaces.",
+    "type": "CONTENT_QUALITY"
+  }
+]

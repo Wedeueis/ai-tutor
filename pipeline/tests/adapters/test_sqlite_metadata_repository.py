@@ -321,3 +321,60 @@ def test_trust_tier_is_persisted(tmp_path):
     row = repo._connection.execute("SELECT trust_tier FROM concepts WHERE id = 'a'").fetchone()
     assert row[0] == "human-reviewed"
     repo.close()
+
+
+def test_emitted_prerequisite_edges_land_in_typed_links(tmp_path):
+    """End-to-end for RF1.1's "both tiers land in `typed_links`": the domain
+    emitter's exact line format has to survive the adapter's regex scrape."""
+    from pipeline.domain.eval import EvalResult
+    from pipeline.domain.linking import add_prerequisite_links
+    from pipeline.domain.prerequisites import PrerequisiteEdge, PrerequisiteTier
+
+    repo = SqliteMetadataRepository(tmp_path / "m.db")
+    body = add_prerequisite_links(
+        "Espresso extraction notes.",
+        [
+            PrerequisiteEdge(ConceptId("water-temperature"), PrerequisiteTier.REQUIRES, EvalResult()),
+            PrerequisiteEdge(ConceptId("latte-art"), PrerequisiteTier.MAY_REQUIRE, EvalResult()),
+        ],
+    )
+    repo.upsert(
+        Concept(
+            id=ConceptId("espresso-extraction"),
+            frontmatter=Frontmatter(type="Playbook", title="Espresso extraction"),
+            body=body,
+        )
+    )
+
+    relations = repo.find_relations("espresso-extraction")
+    assert {(r.relation_type, r.to_id) for r in relations} == {
+        ("requires", "/water-temperature"),
+        ("may_require", "/latte-art"),
+    }
+
+    # A typed link is a superset signal: it must also be in the plain graph.
+    links = repo.find_links("espresso-extraction")
+    assert "/water-temperature" in links.outgoing
+
+
+def test_only_the_requires_tier_is_returned_when_filtering_for_it(tmp_path):
+    """The planner reads `requires::` and must not see `may_require::` — the
+    inert tier stays inert."""
+    from pipeline.domain.eval import EvalResult
+    from pipeline.domain.linking import add_prerequisite_links
+    from pipeline.domain.prerequisites import PrerequisiteEdge, PrerequisiteTier
+
+    repo = SqliteMetadataRepository(tmp_path / "m.db")
+    body = add_prerequisite_links(
+        "Body.",
+        [
+            PrerequisiteEdge(ConceptId("water-temperature"), PrerequisiteTier.REQUIRES, EvalResult()),
+            PrerequisiteEdge(ConceptId("latte-art"), PrerequisiteTier.MAY_REQUIRE, EvalResult()),
+        ],
+    )
+    repo.upsert(
+        Concept(id=ConceptId("espresso"), frontmatter=Frontmatter(type="Playbook"), body=body)
+    )
+
+    relations = repo.find_relations("espresso", relation_type="requires")
+    assert [r.to_id for r in relations] == ["/water-temperature"]

@@ -18,6 +18,7 @@ from pipeline.domain.computation import Receipt, Verdict
 from pipeline.domain.concept import Concept, ConceptId, LinkGraph
 from pipeline.domain.eval import Rubric, RubricScore
 from pipeline.domain.intake import IntakeItem, IntakeKind, IntakeState
+from pipeline.domain.prerequisites import PrerequisiteAssessment
 from pipeline.domain.raw_material import RawItem
 from pipeline.domain.source_document import ParsedDocument
 
@@ -213,6 +214,37 @@ class FakeQualityEvalSkill:
         return self._scores
 
 
+class FakePrerequisiteJudgementSkill:
+    """Canned per-target rubric scores. `assessments_by_target` maps a target
+    concept id to the scores the skill "returned" for it; a candidate with no
+    entry is omitted from the result, which is how the real skill signals
+    "plainly not a prerequisite"."""
+
+    def __init__(self, assessments_by_target: dict[str, list[RubricScore]] | None = None) -> None:
+        self._by_target = assessments_by_target or {}
+        self.calls: list[tuple[str, list[str]]] = []
+
+    def judge(self, draft, candidates, rubrics) -> list[PrerequisiteAssessment]:
+        self.calls.append(
+            (draft.frontmatter.title or "", [str(c.concept_id) for c in candidates])
+        )
+        assessments = []
+        for candidate in candidates:
+            scores = self._by_target.get(str(candidate.concept_id))
+            if scores is None:
+                continue
+            assessments.append(
+                PrerequisiteAssessment(
+                    target_id=ConceptId(str(candidate.concept_id)),
+                    scores=scores,
+                    # Same rollup the real adapter does, so a test asserting on
+                    # the logged rationale isn't asserting on fake-only behaviour.
+                    rationale="; ".join(s.rationale for s in scores if s.rationale),
+                )
+            )
+        return assessments
+
+
 class FakeRelatednessSkill:
     def __init__(self, verdict: RelatednessVerdict | None = None) -> None:
         self._verdict = verdict or RelatednessVerdict(related=[])
@@ -235,14 +267,19 @@ class FakeEvalRubricsRepository:
         self,
         rubrics_by_domain: dict[str, list[Rubric]] | None = None,
         base_rubrics: list[Rubric] | None = None,
+        named_rubrics: dict[str, list[Rubric]] | None = None,
     ) -> None:
         self._rubrics_by_domain = rubrics_by_domain or {}
         self._base_rubrics = base_rubrics or []
+        self._named_rubrics = named_rubrics or {}
 
     def load_for_domain(self, domain_id: str | None) -> list[Rubric]:
         if domain_id is not None and domain_id in self._rubrics_by_domain:
             return self._rubrics_by_domain[domain_id]
         return self._base_rubrics
+
+    def load_named(self, name: str) -> list[Rubric]:
+        return self._named_rubrics.get(name, [])
 
 
 class FakeEmbedding:

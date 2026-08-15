@@ -119,3 +119,74 @@ def test_quality_eval_scores_a_fabricated_draft_low():
     result = aggregate_scores(scores, threshold=0.7)
 
     assert result.passed is False
+
+
+PREREQUISITE_RUBRICS = [
+    Rubric(
+        "blocks_comprehension",
+        RubricContent(
+            "A learner who does not already understand the TARGET would be unable to "
+            "follow the SOURCE — not merely less enriched by it."
+        ),
+    ),
+    Rubric(
+        "not_merely_related",
+        RubricContent(
+            "The two concepts are not siblings, alternatives, or examples of one another; "
+            "a learner could not simply study either one first."
+        ),
+    ),
+]
+
+
+def _prerequisite_draft() -> DraftConcept:
+    return DraftConcept(
+        frontmatter=Frontmatter(
+            type="Concept",
+            title="Multi-head attention",
+            description="Running several attention heads in parallel over the same input.",
+        ),
+        body=(
+            "Multi-head attention runs several scaled dot-product attention operations in "
+            "parallel, each with its own learned query, key and value projections, then "
+            "concatenates their outputs and projects the result once more."
+        ),
+        source_raw_id="raw-1",
+    )
+
+
+def test_prerequisite_skill_returns_one_score_per_rubric_per_candidate():
+    from pipeline.adapters.ollama.skills.prerequisite_judgement import (
+        OllamaPrerequisiteJudgementSkill,
+    )
+    from pipeline.domain.prerequisites import PrerequisiteCandidate
+
+    client = OllamaClient("http://localhost:11434")
+    skill = OllamaPrerequisiteJudgementSkill(client, CHAT_MODEL)
+    candidates = [
+        PrerequisiteCandidate(
+            concept_id=ConceptId("scaled-dot-product-attention"),
+            title="Scaled dot-product attention",
+            description="The attention operation multi-head attention runs in parallel.",
+        )
+    ]
+
+    assessments = skill.judge(_prerequisite_draft(), candidates, PREREQUISITE_RUBRICS)
+
+    assert len(assessments) == 1
+    assert assessments[0].target_id == ConceptId("scaled-dot-product-attention")
+    # One entry per rubric, in rubric order, whatever the model actually answered.
+    assert [s.rubric_id for s in assessments[0].scores] == [
+        r.rubric_id for r in PREREQUISITE_RUBRICS
+    ]
+
+
+def test_prerequisite_skill_short_circuits_without_rubrics_or_candidates():
+    from pipeline.adapters.ollama.skills.prerequisite_judgement import (
+        OllamaPrerequisiteJudgementSkill,
+    )
+
+    skill = OllamaPrerequisiteJudgementSkill(OllamaClient("http://localhost:11434"), CHAT_MODEL)
+
+    assert skill.judge(_prerequisite_draft(), [], PREREQUISITE_RUBRICS) == []
+    assert skill.judge(_prerequisite_draft(), [], []) == []

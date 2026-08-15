@@ -55,7 +55,9 @@ class OllamaQualityEvalSkill:
             description=draft.frontmatter.description or "",
             body=draft.body,
         )
-        parsed = self._client.generate_json_object(self._model, prompt)
+        # Array-shaped, like extraction: one entry per rubric. A model that
+        # scored exactly one rubric sometimes returns the bare object instead.
+        parsed = self._client.generate_json(self._model, prompt)
         entries = parsed if isinstance(parsed, list) else [parsed]
 
         by_id = {}

@@ -73,6 +73,8 @@ class Settings:
     eval_threshold: float
     relatedness_min_score: float
     category_confidence_threshold: float
+    prerequisite_threshold: float
+    prerequisite_candidate_k: int
     search_pool_k: int
     search_graph_seed_k: int
     search_graph_max_hops: int
@@ -117,6 +119,8 @@ class Settings:
             eval_threshold=_float_env("EVAL_THRESHOLD", 0.7),
             relatedness_min_score=_float_env("RELATEDNESS_MIN_SCORE", 0.5),
             category_confidence_threshold=_float_env("CATEGORY_CONFIDENCE_THRESHOLD", 0.6),
+            prerequisite_threshold=_float_env("PREREQUISITE_THRESHOLD", 0.7),
+            prerequisite_candidate_k=_int_env("PREREQUISITE_CANDIDATE_K", 5),
             search_pool_k=_int_env("SEARCH_POOL_K", 20),
             search_graph_seed_k=_int_env("SEARCH_GRAPH_SEED_K", 5),
             search_graph_max_hops=_int_env("SEARCH_GRAPH_MAX_HOPS", 2),

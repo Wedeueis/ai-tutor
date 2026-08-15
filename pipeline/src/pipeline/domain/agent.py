@@ -6,6 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from pipeline.domain.concept import ConceptId, Frontmatter
+from pipeline.domain.prerequisites import PrerequisiteEdge
 
 
 @dataclass(frozen=True)
@@ -151,6 +152,12 @@ class CreateDecision:
     `type: Category` concept and links `concept.body` to it. Existing-category
     assignments, by contrast, are already woven into `concept.body` as links
     by `KnowledgeAgent`, the same way `related` links are."""
+    prerequisites: list[PrerequisiteEdge] = field(default_factory=list)
+    """Prerequisite edges, already woven into `concept.body` as
+    `requires::`/`may_require::` lines. Carried here only so IngestRawMaterial
+    can record them in the bundle log — unlike `related`, these get **no**
+    reciprocal backlink: "A requires B" is a claim about A, and writing the
+    reverse would assert a dependency nobody judged."""
 
 
 @dataclass(frozen=True)

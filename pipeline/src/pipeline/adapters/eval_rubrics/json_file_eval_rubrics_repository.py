@@ -25,6 +25,14 @@ class JsonFileEvalRubricsRepository:
         base = self._read(_BASE_FILENAME)
         return base or []
 
+    def load_named(self, name: str) -> list[Rubric]:
+        """`evals/<name>.json`, with **no `_base.json` fallback** — a rubric set
+        for a specific judgement (`prerequisites`) scores a different subject
+        than the concept-quality rubrics, so silently substituting those would
+        grade the wrong thing rather than grade nothing. Missing file means an
+        empty set, which the caller is expected to treat as a misconfiguration."""
+        return self._read(f"{name}.json") or []
+
     def _read(self, relative_path: str) -> list[Rubric] | None:
         path = self._evals_dir / relative_path
         if not path.exists():

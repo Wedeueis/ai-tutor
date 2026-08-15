@@ -19,6 +19,14 @@ _SOURCE_DOCUMENT_EXTENSIONS = {
     ".jpeg",
 }
 
+_EXCLUDED_DIRECTORY = "inquiries"
+"""`vault/raw/inquiries/` holds *questions about* the knowledge — coverage gaps
+and contradictions the tutor notices while teaching — not material to distil.
+Ingesting one would produce a concept describing the gap rather than one
+filling it, so it is excluded here by path, which is the single rule that
+folder's README promises. Answering an inquiry needs a research-and-synthesise
+flow this pipeline does not have yet (issue #15)."""
+
 
 class IntakeState(str, Enum):
     DISCOVERED = "discovered"
@@ -37,6 +45,8 @@ class IntakeKind(str, Enum):
 def classify_kind(path: str) -> IntakeKind | None:
     """Extension-based classification. Returns None for unrecognized files, which
     the scanner should skip rather than track."""
+    if _EXCLUDED_DIRECTORY in PurePath(path).parts:
+        return None
     suffix = PurePath(path).suffix.lower()
     if suffix in _RAW_NOTE_EXTENSIONS:
         return IntakeKind.RAW_NOTE

@@ -25,6 +25,9 @@ from pipeline.application.ports.skills.entity_disambiguation import (
     EntityDisambiguationSkillPort,
 )
 from pipeline.application.ports.skills.extraction import ExtractionSkillPort
+from pipeline.application.ports.skills.prerequisite_judgement import (
+    PrerequisiteJudgementSkillPort,
+)
 from pipeline.application.ports.skills.quality_eval import QualityEvalSkillPort
 from pipeline.application.ports.skills.relatedness import RelatednessSkillPort
 from pipeline.application.ports.skills.type_classification import (
@@ -43,14 +46,27 @@ from pipeline.domain.agent import (
     RelatedConcept,
     RelatednessCandidate,
 )
-from pipeline.domain.concept import ConceptId
+from pipeline.domain.concept import NON_CONTENT_TYPES, ConceptId
 from pipeline.domain.eval import DEFAULT_EVAL_THRESHOLD, aggregate_scores
-from pipeline.domain.linking import add_category_links, add_related_links
+from pipeline.domain.linking import (
+    add_category_links,
+    add_prerequisite_links,
+    add_related_links,
+)
+from pipeline.domain.prerequisites import (
+    PrerequisiteCandidate,
+    PrerequisiteEdge,
+    select_prerequisites,
+)
 from pipeline.domain.raw_material import RawItem
+from pipeline.domain.slug import slugify
 
 DEFAULT_DISAMBIGUATION_CONFIDENCE_THRESHOLD = 0.75
 DEFAULT_RELATEDNESS_MIN_SCORE = 0.5
 DEFAULT_CATEGORY_CONFIDENCE_THRESHOLD = 0.6
+DEFAULT_PREREQUISITE_THRESHOLD = 0.7
+DEFAULT_PREREQUISITE_CANDIDATE_K = 5
+PREREQUISITE_RUBRICS = "prerequisites"
 DOMAIN_TYPE = "Domain"
 CATEGORY_TYPE = "Category"
 
@@ -69,6 +85,7 @@ class KnowledgeAgent:
         category_classification: CategoryClassificationSkillPort,
         quality_eval: QualityEvalSkillPort,
         relatedness: RelatednessSkillPort,
+        prerequisite_judgement: PrerequisiteJudgementSkillPort,
         eval_rubrics_repository: EvalRubricsRepositoryPort,
         metadata_repository: MetadataRepositoryPort,
         concept_repository: ConceptRepositoryPort,
@@ -76,6 +93,8 @@ class KnowledgeAgent:
         eval_threshold: float = DEFAULT_EVAL_THRESHOLD,
         relatedness_min_score: float = DEFAULT_RELATEDNESS_MIN_SCORE,
         category_confidence_threshold: float = DEFAULT_CATEGORY_CONFIDENCE_THRESHOLD,
+        prerequisite_threshold: float = DEFAULT_PREREQUISITE_THRESHOLD,
+        prerequisite_candidate_k: int = DEFAULT_PREREQUISITE_CANDIDATE_K,
     ) -> None:
         self._extraction = extraction
         self._embedding = embedding
@@ -86,6 +105,7 @@ class KnowledgeAgent:
         self._category_classification = category_classification
         self._quality_eval = quality_eval
         self._relatedness = relatedness
+        self._prerequisite_judgement = prerequisite_judgement
         self._eval_rubrics_repository = eval_rubrics_repository
         self._metadata_repository = metadata_repository
         self._concept_repository = concept_repository
@@ -93,6 +113,8 @@ class KnowledgeAgent:
         self._eval_threshold = eval_threshold
         self._relatedness_min_score = relatedness_min_score
         self._category_confidence_threshold = category_confidence_threshold
+        self._prerequisite_threshold = prerequisite_threshold
+        self._prerequisite_candidate_k = prerequisite_candidate_k
 
     def run(self, raw: RawItem) -> AgentResult:
         drafts = self._extraction.extract(raw)
@@ -155,6 +177,9 @@ class KnowledgeAgent:
             category_links, new_categories = self._classify_categories(draft, final_domain)
             body = add_category_links(body, category_links)
 
+            prerequisites = self._judge_prerequisites(draft, vector)
+            body = add_prerequisite_links(body, prerequisites)
+
             resolved_draft = replace(
                 draft,
                 body=body,
@@ -166,10 +191,73 @@ class KnowledgeAgent:
                 ),
             )
             decisions.append(
-                CreateDecision(concept=resolved_draft, related=related, new_categories=new_categories)
+                CreateDecision(
+                    concept=resolved_draft,
+                    related=related,
+                    new_categories=new_categories,
+                    prerequisites=prerequisites,
+                )
             )
 
         return AgentResult(decisions=decisions)
+
+    def _judge_prerequisites(
+        self, draft: DraftConcept, vector: list[float]
+    ) -> list[PrerequisiteEdge]:
+        """Scores which existing concepts the draft genuinely depends on.
+
+        Runs its **own, domain-unscoped** vector search rather than reusing the
+        disambiguation candidates. Those are filtered by `domain` when the
+        draft has one, but a prerequisite routinely lives outside the
+        dependent's domain (linear algebra under a machine-learning concept) or
+        carries no domain at all — RF1.1 requires this to work when `domain:`
+        is absent, which is the common case in this vault. The embedding is
+        reused, so this costs one more search, not one more embed.
+
+        Structural concepts (Category, MOC, Domain, Source Document) are
+        dropped: they organise knowledge rather than teach it, so nothing can
+        require one.
+
+        No cycle map is passed. A cycle needs an existing path back to the
+        source, and a brand-new draft has no incoming edges yet — the backfill
+        (`BackfillPrerequisites`), which walks concepts that *do*, supplies one.
+        """
+        rubrics = self._eval_rubrics_repository.load_named(PREREQUISITE_RUBRICS)
+        if not rubrics:
+            logger.warning(
+                "knowledge_agent: no %s rubrics found; skipping prerequisite emission",
+                PREREQUISITE_RUBRICS,
+            )
+            return []
+
+        matches = self._vector_search.query(vector, k=self._prerequisite_candidate_k, where=None)
+        candidates = []
+        for match in matches:
+            concept = self._concept_repository.load(match.concept_id)
+            if concept.frontmatter.type in NON_CONTENT_TYPES:
+                continue
+            candidates.append(
+                PrerequisiteCandidate(
+                    concept_id=match.concept_id,
+                    title=concept.frontmatter.title,
+                    description=concept.frontmatter.description,
+                )
+            )
+        if not candidates:
+            return []
+
+        assessments = self._prerequisite_judgement.judge(draft, candidates, rubrics)
+        source_id = slugify(draft.frontmatter.title or draft.source_raw_id)
+        edges = select_prerequisites(
+            source_id=source_id,
+            assessments=assessments,
+            threshold=self._prerequisite_threshold,
+        )
+        logger.debug(
+            "knowledge_agent: prerequisites %s",
+            {str(e.target_id): e.relation_type for e in edges},
+        )
+        return edges
 
     def _judge_related(
         self, draft: DraftConcept, candidates: list[CandidateMatch]

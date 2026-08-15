@@ -25,6 +25,7 @@ from tests.application.fakes import (
     FakeEvalRubricsRepository,
     FakeExtractionSkill,
     FakeMetadataRepository,
+    FakePrerequisiteJudgementSkill,
     FakeQualityEvalSkill,
     FakeRawMaterialRepository,
     FakeRelatednessSkill,
@@ -46,6 +47,8 @@ def _build(
     candidates=None,
     relatedness_verdict=None,
     source_concepts=None,
+    prerequisite_skill=None,
+    prerequisite_rubrics=None,
 ):
     concept_repository = FakeConceptRepository()
     for concept in existing_concepts or []:
@@ -72,7 +75,11 @@ def _build(
         category_classification=FakeCategoryClassificationSkill(),
         quality_eval=FakeQualityEvalSkill(scores),
         relatedness=FakeRelatednessSkill(relatedness_verdict),
-        eval_rubrics_repository=FakeEvalRubricsRepository(base_rubrics=[RUBRIC]),
+        prerequisite_judgement=prerequisite_skill or FakePrerequisiteJudgementSkill(),
+        eval_rubrics_repository=FakeEvalRubricsRepository(
+            base_rubrics=[RUBRIC],
+            named_rubrics={"prerequisites": prerequisite_rubrics or []},
+        ),
         metadata_repository=metadata_repository,
         concept_repository=concept_repository,
     )
@@ -497,3 +504,80 @@ def test_one_item_failing_unexpectedly_does_not_abort_the_batch():
     assert len(good_outcome.created) == 1
     assert "raw-good" in raw_material_repository.processed
     assert any(entry["action"] == "create" for entry in bundle_log.entries)
+
+
+def test_emitted_prerequisites_are_recorded_in_the_bundle_log_with_their_rationale():
+    """The body carries the bare `requires::` line and nothing else, so the
+    log is the only place a human reviewing a demoted edge can see why."""
+    from pipeline.domain.eval import RubricContent
+    from tests.application.fakes import FakePrerequisiteJudgementSkill
+
+    target_id = ConceptId("water-temperature")
+    target = Concept(
+        id=target_id,
+        frontmatter=Frontmatter(type="Playbook", title="Water temperature"),
+        body="About water temperature.",
+    )
+    raw = RawItem(id="raw-1", content="Espresso extraction depends on water temperature.")
+    draft = DraftConcept(
+        frontmatter=Frontmatter(type="Unclassified", title="Espresso extraction"),
+        body="Espresso extraction notes.",
+        source_raw_id="raw-1",
+    )
+    use_case, concept_repository, _, bundle_log = _build(
+        [raw],
+        {"raw-1": [draft]},
+        existing_concepts=[target],
+        disambiguation_verdict=DisambiguationVerdict(same_as=None, confidence=0.1),
+        candidates=[CandidateMatch(concept_id=target_id, score=0.6)],
+        prerequisite_rubrics=[Rubric("blocks", RubricContent("Must be required."))],
+        prerequisite_skill=FakePrerequisiteJudgementSkill(
+            {"water-temperature": [RubricScore("blocks", 0.9, "cannot follow without it")]}
+        ),
+    )
+
+    outcomes = use_case.run()
+
+    new_id = outcomes[0].created[0]
+    assert "requires:: [[/water-temperature]]" in concept_repository.load(new_id).body
+
+    entries = [e for e in bundle_log.entries if e["action"] == "require"]
+    assert len(entries) == 1
+    assert entries[0]["concept_id"] == str(new_id)
+    assert "water-temperature" in entries[0]["message"]
+    assert "cannot follow without it" in entries[0]["message"]
+
+
+def test_a_prerequisite_gets_no_reciprocal_backlink():
+    """Unlike relatedness, "A requires B" is a claim about A. Writing the
+    reverse would assert a dependency nobody judged."""
+    from pipeline.domain.eval import RubricContent
+    from tests.application.fakes import FakePrerequisiteJudgementSkill
+
+    target_id = ConceptId("water-temperature")
+    target = Concept(
+        id=target_id,
+        frontmatter=Frontmatter(type="Playbook", title="Water temperature"),
+        body="About water temperature.",
+    )
+    raw = RawItem(id="raw-1", content="...")
+    draft = DraftConcept(
+        frontmatter=Frontmatter(type="Unclassified", title="Espresso extraction"),
+        body="Espresso extraction notes.",
+        source_raw_id="raw-1",
+    )
+    use_case, concept_repository, _, _ = _build(
+        [raw],
+        {"raw-1": [draft]},
+        existing_concepts=[target],
+        disambiguation_verdict=DisambiguationVerdict(same_as=None, confidence=0.1),
+        candidates=[CandidateMatch(concept_id=target_id, score=0.6)],
+        prerequisite_rubrics=[Rubric("blocks", RubricContent("Must be required."))],
+        prerequisite_skill=FakePrerequisiteJudgementSkill(
+            {"water-temperature": [RubricScore("blocks", 0.9, "required")]}
+        ),
+    )
+
+    use_case.run()
+
+    assert concept_repository.load(target_id).body == "About water temperature."
