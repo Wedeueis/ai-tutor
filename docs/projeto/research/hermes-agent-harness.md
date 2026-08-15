@@ -3,6 +3,18 @@
 Research note for [issue #3](https://github.com/Wedeueis/ai-tutor/issues/3) (map: [#1](https://github.com/Wedeueis/ai-tutor/issues/1)).
 Date: 2026-08-15. Branch: `research/hermes-harness`.
 
+> **Corrected 2026-08-15, after publication.** The original note argued that PRD v2 was
+> *name-dropping* rather than citing Hermes, and rested that argument on a second claim: that v2's
+> description of OKF as a Google standard was false. **That second claim was itself false.** OKF —
+> the Open Knowledge **Format** — is an open, vendor-neutral standard published by Google Cloud's
+> Data Cloud team ([v0.1, June 2026](https://cloud.google.com/blog/products/data-analytics/how-the-open-knowledge-format-can-improve-data-sharing));
+> this repo's `WIKI_SPEC.md` is v0.2 of it. v2's only error was writing *Framework* for *Format*.
+>
+> With that premise gone, the "name-dropping" inference collapses, and Hermes
+> ([hermes-agent.org](https://hermes-agent.org/)) stands as what PRD v3 treats it as: a legitimate
+> architecture reference for the tutor's harness. §1 and §2 below are corrected; the technical
+> findings about Hermes' mechanisms and ADK's primitives were unaffected and stand as written.
+
 **Standing constraint**: Google ADK (`google-adk`, currently `2.6.3` in `agent/`) stays the runtime.
 Hermes is an architecture reference only — not a dependency to adopt.
 
@@ -15,11 +27,11 @@ Hermes is an architecture reference only — not a dependency to adopt.
    MIT-licensed, docs at <https://hermes-agent.nousresearch.com/docs>. It is *not* the Hermes
    **models** (Nous Research's fine-tuned LLM line) — the docs are explicit that the harness is
    "model-agnostic … distinct from the Hermes LLM line that shares the name."
-2. **But the PRD is almost certainly name-dropping, not citing.** See §2 — there is nothing in
-   Hermes Agent about pedagogy, domain-typed personas, or tutoring. "Hermes Agent Harness" as the
-   PRD uses it (a component that "instantiates" per-domain pedagogical strategies) does not exist
-   under that name anywhere. What exists is a general-purpose personal-assistant harness whose
-   *mechanisms* happen to be a good reference for persona/tool/state injection.
+2. **It is a real reference, but it carries no pedagogy.** There is nothing in Hermes Agent about
+   pedagogy, domain-typed personas, or tutoring — it is a general-purpose personal-assistant
+   harness whose *mechanisms* are a good reference for persona/tool/state injection. So "Hermes
+   Agent Harness" names a real artifact worth borrowing structure from; the per-domain pedagogical
+   layer PRD v2 describes on top of it is ours to design, not something to conform to.
 3. **Most of what is worth borrowing, ADK already ships.** ADK 2.6.3 implements the same
    [Agent Skills](https://agentskills.io/specification) standard Hermes skills use
    (`google.adk.tools.skill_toolset.SkillToolset`), plus dynamic instructions, context-aware tool
@@ -42,12 +54,15 @@ Hermes is an architecture reference only — not a dependency to adopt.
 | **Nous Research Hermes Agent** | Open-source (MIT) agent harness / personal assistant runtime — [repo](https://github.com/NousResearch/hermes-agent), [docs](https://hermes-agent.nousresearch.com/docs) | **Partially.** It is a real harness with persona, skill, tool and memory injection. Nothing pedagogical, nothing domain-typed. |
 | **Any "Hermes" tutoring harness** | — | **Does not exist.** No primary source found. |
 
-### Evidence the PRD is not citing a real artifact
+### Where PRD v2 diverges from the real artifact
 
-- The same PRD's §1.1 calls OKF "o padrão Open Knowledge Framework (OKF) **da Google**"
-  (`docs/projeto/PRDs/PRD AI Tutor.md:11`). That is false — OKF is defined by this repo's own
-  `WIKI_SPEC.md` and is not a Google standard. A document that misattributes the format it is
-  built on is a document that name-drops.
+*(This section originally argued the PRD cited nothing real. That argument was wrong — see the
+correction at the top. What follows is what survives it: the specific places v2's design departs
+from how Hermes actually works.)*
+
+- **OKF: v2 was right.** It calls OKF "o padrão Open Knowledge Framework (OKF) **da Google**"
+  (`docs/projeto/PRDs/PRD AI Tutor.md:11`). OKF *is* a Google Cloud–published open standard; only
+  the word is wrong (*Format*, not *Framework*), and this repo's `WIKI_SPEC.md` is v0.2 of it.
 - The PRD's `HermesDomainOrchestrator` is specified as a **domain service in the hexagon**
   (`src/pipeline/domain/services/hermes_orchestrator.py`) selecting prompt guidelines by
   `DomainType`. Hermes Agent has no such concept: its identity layer is a single `SOUL.md` per
@@ -366,12 +381,15 @@ enforcement should fail closed; telemetry should not.
 ## 7. Dead ends and honesty notes
 
 - **No pedagogical Hermes exists.** Searches for a "Hermes" harness with persona/pedagogy/domain
-  strategies returned nothing but Nous Research's Hermes Agent and the Hermes model line. If the
-  PRD's author had a specific other artifact in mind, it is not publicly documented.
-- **The PRD's provenance is shaky** (the "OKF da Google" misattribution). Other unexplained proper
-  nouns in it — `QuizGeneratorSkill`, `QualityEvalSkill`, `SocraticDialogueEngine` — should be
-  treated as invented placeholders unless someone produces a source, not as named prior art to
-  match.
+  strategies returned nothing but Nous Research's Hermes Agent and the Hermes model line. That
+  remains true — and it is a statement about scope, not about legitimacy: Hermes is a real harness
+  that simply does not do pedagogy.
+- **An inference this note originally got wrong.** It treated the PRD's "OKF da Google" as a
+  misattribution and reasoned from there that the PRD's other proper nouns were probably invented.
+  The premise was false (see the correction at the top), so the inference does not hold. Names like
+  `QuizGeneratorSkill`, `QualityEvalSkill`, and `SocraticDialogueEngine` should be treated as
+  *unverified* — checked individually before being relied on — rather than presumed invented.
+  The lesson: one confirmed error in a document is not evidence about its unrelated claims.
 - **Hermes docs describe intent, not always behaviour** (issue #2817: four hooks documented and
   never invoked for ~2 weeks). Every Hermes claim in this note is cited to a doc page or the repo;
   none of it was executed or verified against a running Hermes.
