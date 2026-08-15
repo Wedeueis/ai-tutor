@@ -47,6 +47,7 @@ from pipeline.adapters.sqlite.sqlite_metadata_repository import SqliteMetadataRe
 from pipeline.application.use_cases.audit_concept_quality import AuditConceptQuality
 from pipeline.application.use_cases.categorize_concepts import CategorizeConcepts
 from pipeline.application.use_cases.category_materializer import CategoryMaterializer
+from pipeline.application.use_cases.evaluate_prerequisites import EvaluatePrerequisites
 from pipeline.application.use_cases.index_concept import IndexConcept
 from pipeline.application.use_cases.ingest_raw_material import IngestRawMaterial
 from pipeline.application.use_cases.knowledge_agent import KnowledgeAgent
@@ -161,6 +162,13 @@ class Container:
         self.rebuild_index = RebuildIndex(self.concept_repository, self.index_concept)
         self.category_materializer = CategoryMaterializer(
             self.concept_repository, self.index_concept, self.bundle_log
+        )
+        self.evaluate_prerequisites = EvaluatePrerequisites(
+            concept_repository=self.concept_repository,
+            prerequisite_judgement=self.prerequisite_judgement_skill,
+            eval_rubrics_repository=self.eval_rubrics_repository,
+            evals_dir=settings.evals_dir,
+            threshold=settings.prerequisite_threshold,
         )
         self.categorize_concepts = CategorizeConcepts(
             concept_repository=self.concept_repository,
@@ -527,3 +535,44 @@ def mcp_serve(
 
 if __name__ == "__main__":
     app()
+
+
+@app.command(name="eval-prerequisites")
+def eval_prerequisites(
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Show every pair, not just the failures."
+    ),
+) -> None:
+    """Measure the prerequisite gate's precision against the human-labelled
+    gold set (RF1.3). Exits non-zero below the 0.9 bar.
+
+    Without this the gate is an LLM grading an LLM. Precision only: a wrong
+    `requires::` edge sends the learner to study something they don't need and
+    nothing downstream catches it, while a missed one costs the planner a
+    dependency it could have used. Recall is reported but never gated."""
+    container = _container()
+    report = container.evaluate_prerequisites.run()
+
+    for outcome in report.outcomes:
+        is_failure = not outcome.correct
+        if not (verbose or is_failure):
+            continue
+        marker = "FAIL" if is_failure else "ok  "
+        tier = outcome.tier.value if outcome.tier else "(no edge)"
+        expected = "requires" if outcome.pair.is_prerequisite else "not-a-prerequisite"
+        typer.echo(
+            f"{marker}  {outcome.pair.source} -> {outcome.pair.target}\n"
+            f"        expected={expected}  got={tier}  avg={outcome.average_score:.2f}"
+        )
+
+    typer.echo("")
+    typer.echo(f"pairs               {len(report.outcomes)}")
+    typer.echo(f"emitted as requires {len(report.predicted)}")
+    typer.echo(f"false positives     {len(report.false_positives)}")
+    typer.echo(f"precision           {report.precision:.3f}  (bar {report.bar:.2f})")
+    typer.echo(f"recall              {report.recall:.3f}  (not gated)")
+
+    if not report.passed:
+        typer.echo("")
+        typer.echo("BELOW THE BAR - do not backfill (see `pipeline prerequisites`).")
+        raise typer.Exit(code=1)
