@@ -55,5 +55,5 @@ def add_category_links(body: str, links: list[RelatedConcept]) -> str:
     return add_link_section(body, _CATEGORIES_HEADING, links)
 
 
-def _has_link(body: str, concept_id) -> bool:
+def _has_link(body: str, concept_id: object) -> bool:
     return f"(/{concept_id}.md)" in body

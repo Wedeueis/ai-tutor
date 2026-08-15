@@ -40,7 +40,7 @@ class OllamaEntityDisambiguationSkill:
             body=draft.body,
             candidates=candidates_text,
         )
-        parsed = self._client.generate_json(self._model, prompt)
+        parsed = self._client.generate_json_object(self._model, prompt)
 
         same_as_raw = parsed.get("same_as")
         return DisambiguationVerdict(

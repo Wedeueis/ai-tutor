@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from typing import Any
 
 import httpx
 
@@ -81,12 +82,15 @@ class OllamaClient:
         )
         return response.json()["response"]
 
-    def generate_json(self, model: str, prompt: str) -> dict | list:
+    def generate_json(self, model: str, prompt: str) -> dict[str, Any] | list[Any]:
         """Generates a response and decodes the first complete JSON value found in
         it — local chat models routinely wrap JSON in prose/code fences, or tack on
         extra commentary *after* the JSON, so this scans to the first `{`/`[` and
         decodes incrementally rather than assuming the whole rest of the text (or a
-        greedy brace-to-brace regex match) is valid JSON."""
+        greedy brace-to-brace regex match) is valid JSON.
+
+        Returns whichever shape the model produced. Only the extraction skill
+        wants an array; every other skill should call `generate_json_object`."""
         text = self.generate(model, prompt)
         start = next((i for i, ch in enumerate(text) if ch in "{["), None)
         if start is None:
@@ -97,6 +101,19 @@ class OllamaClient:
             value, _ = json.JSONDecoder(strict=False).raw_decode(text[start:])
         except json.JSONDecodeError as exc:
             raise OllamaError(f"invalid JSON in Ollama response: {exc}") from exc
+        return value
+
+    def generate_json_object(self, model: str, prompt: str) -> dict[str, Any]:
+        """`generate_json` for the skills whose prompt asks for a single JSON
+        object — every one of them reads the result with `.get`, so an array
+        coming back is a model failure like any other malformed response and is
+        raised as `OllamaError` here rather than handed on to become an
+        `AttributeError` deep inside a skill adapter."""
+        value = self.generate_json(model, prompt)
+        if not isinstance(value, dict):
+            raise OllamaError(
+                f"expected a JSON object from Ollama, got {type(value).__name__}: {value!r}"
+            )
         return value
 
     def generate_with_image(self, model: str, prompt: str, image_base64: str) -> str:

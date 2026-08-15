@@ -33,9 +33,11 @@ from pipeline.application.ports.skills.type_classification import (
 from pipeline.application.ports.vector_search import VectorSearchPort
 from pipeline.domain.agent import (
     AgentResult,
+    CandidateMatch,
     CategoryCandidate,
     CreateDecision,
     DomainCandidate,
+    DraftConcept,
     MergeDecision,
     RejectDecision,
     RelatedConcept,
@@ -169,7 +171,9 @@ class KnowledgeAgent:
 
         return AgentResult(decisions=decisions)
 
-    def _judge_related(self, draft, candidates) -> list:
+    def _judge_related(
+        self, draft: DraftConcept, candidates: list[CandidateMatch]
+    ) -> list[RelatedConcept]:
         """Judges which candidates (already ruled out as the same entity) are
         genuinely related and worth linking to — how clusters emerge in the
         link graph instead of relying on flat tags. Candidates below
@@ -191,7 +195,7 @@ class KnowledgeAgent:
         return self._relatedness.judge(draft, enriched).related
 
     def _classify_categories(
-        self, draft, domain: str | None
+        self, draft: DraftConcept, domain: str | None
     ) -> tuple[list[RelatedConcept], list[str]]:
         """Existing-category assignments (returned as `RelatedConcept`, ready
         for `add_category_links`) plus any newly-proposed category titles
@@ -220,7 +224,7 @@ class KnowledgeAgent:
         ]
         return links, verdict.new_categories
 
-    def _classify_domain(self, draft) -> ConceptId | None:
+    def _classify_domain(self, draft: DraftConcept) -> ConceptId | None:
         domain_ids = self._metadata_repository.find_ids_by_type(DOMAIN_TYPE)
         if not domain_ids:
             return None

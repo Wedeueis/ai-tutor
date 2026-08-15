@@ -45,7 +45,7 @@ class OllamaCategoryClassificationSkill:
             description=draft.frontmatter.description or "",
             body=draft.body,
         )
-        parsed = self._client.generate_json(self._model, prompt)
+        parsed = self._client.generate_json_object(self._model, prompt)
 
         return CategoryClassificationVerdict(
             categories=_resolve_ids(parsed.get("categories") or [], known_categories),

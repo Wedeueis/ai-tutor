@@ -30,9 +30,44 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "fpdf2>=2.8.7",
+    "mypy>=1.14",
     "pytest>=9.1.1",
+    "pytest-cov>=6.0",
     "ruff>=0.16.2",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Also registered in tests/conftest.py, which additionally uses the marker to
+# skip when Ollama is unreachable. Declared here so `--strict-markers` and
+# `-m integration` work without importing conftest.
+markers = [
+    "integration: needs a real local service (e.g. Ollama) running",
+]
+addopts = "--strict-markers"
+
+[tool.coverage.run]
+source = ["src/pipeline"]
+
+[tool.mypy]
+files = ["src/pipeline"]
+python_version = "3.12"
+# The domain and application layers are the ones NFR7 cares about and the ones
+# with no third-party types to fight; adapters wrap libraries that ship
+# partial or absent stubs, so the strict settings are scoped rather than global.
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = ["pipeline.domain.*", "pipeline.application.*"]
+disallow_untyped_defs = true
+
+# Third-party packages without bundled type information.
+[[tool.mypy.overrides]]
+module = ["chromadb.*", "docling.*", "fpdf.*", "jsonschema.*", "yaml.*"]
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 100

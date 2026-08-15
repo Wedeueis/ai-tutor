@@ -25,9 +25,15 @@ class FilesystemRawMaterialRepository:
         raw_items = []
         for kind in _INGESTIBLE_KINDS:
             for item in self._intake_repository.list_by_state(IntakeState.DISCOVERED, kind=kind):
-                content = (
-                    item.content if item.content is not None else self._scanner.read_text(item.path)
-                )
+                # An intake row is either DB-only (content set, e.g. a chunk) or
+                # file-backed (path set). Neither means a malformed row, and
+                # reading it as empty content would ingest a blank concept.
+                if item.content is not None:
+                    content = item.content
+                elif item.path is not None:
+                    content = self._scanner.read_text(item.path)
+                else:
+                    raise ValueError(f"intake item {item.id} has neither content nor path")
                 raw_items.append(RawItem(id=item.id, content=content, source_id=item.parent_id))
         return raw_items
 

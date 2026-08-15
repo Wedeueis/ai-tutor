@@ -45,7 +45,7 @@ class OllamaDomainClassificationSkill:
             description=draft.frontmatter.description or "",
             body=draft.body,
         )
-        parsed = self._client.generate_json(self._model, prompt)
+        parsed = self._client.generate_json_object(self._model, prompt)
 
         return DomainClassificationVerdict(
             domain=_resolve_id(parsed.get("domain"), candidates),

@@ -93,6 +93,11 @@ class ParseSourceDocuments:
         return outcomes
 
     def _parse_one(self, source: IntakeItem) -> ParseOutcome:
+        if source.path is None:
+            # SOURCE_DOCUMENT items are file-backed by construction (see
+            # domain/intake.py's extension-based classification); a pathless one
+            # is a malformed row, not something to parse as empty.
+            raise ValueError(f"source document {source.id} has no path")
         self._ensure_source_hub(source)
         parsed = self._parsing.parse(source.path)
 

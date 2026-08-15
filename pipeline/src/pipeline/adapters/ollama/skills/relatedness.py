@@ -56,7 +56,7 @@ class OllamaRelatednessSkill:
             body=draft.body,
             candidates=candidates_text,
         )
-        parsed = self._client.generate_json(self._model, prompt)
+        parsed = self._client.generate_json_object(self._model, prompt)
 
         related: list[RelatedConcept] = []
         for entry in parsed.get("related") or []:

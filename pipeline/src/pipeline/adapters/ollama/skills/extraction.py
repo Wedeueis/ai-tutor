@@ -37,11 +37,14 @@ class OllamaExtractionSkill:
     def extract(self, raw: RawItem) -> list[DraftConcept]:
         prompt = _PROMPT.format(content=raw.content)
         parsed = self._client.generate_json(self._model, prompt)
-        if isinstance(parsed, dict):
-            parsed = [parsed]
+        # The prompt asks for an array, but a model that found exactly one
+        # concept often returns the bare object instead.
+        entries = [parsed] if isinstance(parsed, dict) else parsed
 
         drafts = []
-        for entry in parsed:
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue  # a stray scalar in the array is not a concept
             frontmatter = Frontmatter(
                 type=_PLACEHOLDER_TYPE,
                 title=entry.get("title"),

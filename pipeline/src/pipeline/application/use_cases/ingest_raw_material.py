@@ -22,6 +22,7 @@ from pipeline.application.use_cases.knowledge_agent import KnowledgeAgent
 from pipeline.domain.agent import CreateDecision, MergeDecision, RejectDecision, RelatedConcept
 from pipeline.domain.concept import Concept, ConceptId, Frontmatter, Source
 from pipeline.domain.linking import add_link_section, add_related_links, insert_before_related
+from pipeline.domain.raw_material import RawItem
 from pipeline.domain.slug import slugify
 
 _DERIVED_CONCEPTS_HEADING = "## Derived concepts"
@@ -99,7 +100,7 @@ class IngestRawMaterial:
             )
         return outcomes
 
-    def _ingest_one(self, raw) -> IngestOutcome:
+    def _ingest_one(self, raw: RawItem) -> IngestOutcome:
         agent_result = self._knowledge_agent.run(raw)
         source_concept_id = (
             self._raw_material_repository.find_source_concept(raw.source_id)
@@ -171,7 +172,9 @@ class IngestRawMaterial:
             raw_id=raw.id, created=created, merged_into=merged_into, rejected=rejected
         )
 
-    def _write_reciprocal_backlinks(self, concept: Concept, related, raw_id: str) -> None:
+    def _write_reciprocal_backlinks(
+        self, concept: Concept, related: list[RelatedConcept], raw_id: str
+    ) -> None:
         """A new concept's forward links to related concepts are already in
         its own body (KnowledgeAgent wove them in). This writes the reverse
         edge into each existing related concept's body too, bounded to the

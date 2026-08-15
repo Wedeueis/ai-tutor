@@ -162,7 +162,7 @@ def trace_lineage(
     relation_type: str | None = None,
     direction: str = "both",
     max_hops: int = 3,
-) -> list[dict]:
+) -> list[list[dict]]:
     """Every typed-relation path up to max_hops away from a concept (e.g. to
     answer "was this decision superseded?" by walking `supersedes`/
     `superseded_by` edges) — the full chain, not just reachability.

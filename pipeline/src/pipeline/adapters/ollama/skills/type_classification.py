@@ -36,7 +36,7 @@ class OllamaTypeClassificationSkill:
             description=draft.frontmatter.description or "",
             body=draft.body,
         )
-        parsed = self._client.generate_json(self._model, prompt)
+        parsed = self._client.generate_json_object(self._model, prompt)
         resolved_type = parsed.get("resolved_type") or "Unclassified"
         return TypeClassificationVerdict(
             resolved_type=resolved_type,

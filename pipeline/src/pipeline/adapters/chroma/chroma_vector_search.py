@@ -22,14 +22,25 @@ class ChromaVectorSearch:
 
     def upsert(self, concept_id: str, vector: list[float], metadata: dict) -> None:
         clean_metadata = {k: v for k, v in metadata.items() if v is not None} or {"_empty": True}
-        self._collection.upsert(ids=[concept_id], embeddings=[vector], metadatas=[clean_metadata])
+        # chromadb's `embeddings` parameter is typed with an invariant
+        # `list[Sequence[float] | Sequence[int]]`, which a `list[list[float]]`
+        # can never satisfy however correct it is at runtime. Not our bug.
+        self._collection.upsert(
+            ids=[concept_id],
+            embeddings=[vector],  # type: ignore[arg-type]
+            metadatas=[clean_metadata],
+        )
 
     def query(
         self, vector: list[float], k: int = 5, where: dict | None = None
     ) -> list[CandidateMatch]:
         if self._collection.count() == 0:
             return []
-        result = self._collection.query(query_embeddings=[vector], n_results=k, where=where)
+        result = self._collection.query(
+            query_embeddings=[vector],  # type: ignore[arg-type]  # see upsert
+            n_results=k,
+            where=where,
+        )
         ids = result.get("ids", [[]])[0]
         distances = (result.get("distances") or [[]])[0]
         return [

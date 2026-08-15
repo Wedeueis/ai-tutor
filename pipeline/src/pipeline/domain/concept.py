@@ -61,10 +61,12 @@ class Source:
 
 @dataclass(frozen=True)
 class VerificationEvent:
-    """One entry in a concept's `verified` frontmatter (WIKI_SPEC.md §5.2)."""
+    """One entry in a concept's `verified` frontmatter (WIKI_SPEC.md §5.2).
+    `at` is optional because §11 requires tolerating an entry that omits it —
+    the serializer already writes `null` in that case."""
 
     by: Actor
-    at: datetime
+    at: datetime | None
 
 
 @dataclass(frozen=True)

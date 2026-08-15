@@ -27,3 +27,8 @@ vault/.obsidian/
 
 # Windows/WSL alternate-data-stream artefacts
 *:Zone.Identifier
+
+# Coverage artifacts (make coverage / pytest --cov)
+.coverage
+.coverage.*
+htmlcov/

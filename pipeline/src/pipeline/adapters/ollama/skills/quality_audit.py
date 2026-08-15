@@ -52,7 +52,7 @@ class OllamaQualityAuditSkill:
             description=concept.frontmatter.description or "",
             body=concept.body,
         )
-        parsed = self._client.generate_json(self._model, prompt)
+        parsed = self._client.generate_json_object(self._model, prompt)
         return QualityAuditVerdict(
             standalone_quality=bool(parsed.get("standalone_quality", True)),
             reason=parsed.get("reason", ""),
