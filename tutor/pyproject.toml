@@ -1,0 +1,81 @@
+[project]
+name = "tutor"
+version = "0.1.0"
+description = "The stateful AI Tutor: plans, teaches, assesses and schedules revision over the OKF vault, which it reads only through pipeline's MCP server."
+readme = "README.md"
+requires-python = ">=3.12"
+# NO `pipeline` dependency, ever. `tutor` reaches the vault solely over
+# pipeline's MCP server (PRD v3 §2, rule 1) — no Python import, no shared
+# virtualenv, no shared SQLite file. The two must evolve on independent cycles.
+dependencies = [
+    "google-adk>=1.0.0",
+    "litellm>=1.0.0",
+    # Matches `agent/`, not `pipeline/` (which pins >=2.0.0): tutor is an MCP
+    # *client*, so it follows the client-side pin the ADK toolset is known to
+    # work with. The two deployables deliberately do not share a venv.
+    "mcp>=1.9.0,<2.0.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.8.15,<0.9.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.14",
+    # PRD v3 and #6 call this "py-fsrs", which is the *repository* name; the
+    # PyPI distribution is `fsrs` (MIT, and at 6.x it implements the FSRS-6
+    # RF4.1 specifies).
+    #
+    # Test-only, and it must stay that way (RF4.2). FSRS's formulas are
+    # empirical — a reviewer cannot check them by reasoning, only by
+    # differential test — so this is the oracle our own implementation is
+    # tested against, never something the runtime calls.
+    "fsrs>=6.0",
+    "pytest>=9.1.1",
+    "pytest-cov>=6.0",
+    "ruff>=0.16.2",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: needs a real local service (Ollama, or pipeline's MCP server) running",
+]
+addopts = "--strict-markers"
+
+[tool.coverage.run]
+source = ["src/tutor"]
+
+[tool.mypy]
+files = ["src/tutor"]
+python_version = "3.12"
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+check_untyped_defs = true
+
+# NFR7: >= 85% coverage on domain and application, with no I/O mocks in the
+# domain layer. Those are also the layers with no third-party types to fight,
+# so the strict settings are scoped to them rather than applied globally.
+[[tool.mypy.overrides]]
+module = ["tutor.domain.*", "tutor.application.*"]
+disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = ["fsrs.*", "google.adk.*", "litellm.*"]
+ignore_missing_imports = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = [
+    "E501",  # line length is a soft target here, not a hard gate
+    "UP042", # `class X(str, Enum)` -> `StrEnum` is a behavior-adjacent rewrite, not a safe mechanical fix
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["tutor"]

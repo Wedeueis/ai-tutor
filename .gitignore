@@ -14,6 +14,20 @@ pipeline/.env
 agent/.venv/
 agent/.env
 
+# tutor/ — local dev environment, plus the learner's own episodic state.
+# learner.db is a reading and failure history (PRD v3 NFR6): personal, and the
+# one thing in this repo that cannot be regenerated from anything else.
+tutor/.venv/
+tutor/.data/
+tutor/.pytest_cache/
+tutor/.ruff_cache/
+tutor/.env
+# Belt and braces: LEARNER_DB_PATH can point outside .data/.
+learner.db
+sessions.db
+# NOT ignored: tutor/proposals/. Those are derived concepts awaiting human
+# approval — the point is that a person reviews them, so they stay visible.
+
 # Obsidian's local app/workspace state (window layout, plugin cache) —
 # machine-specific, not vault content.
 vault/.obsidian/
