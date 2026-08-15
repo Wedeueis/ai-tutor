@@ -15,11 +15,17 @@ shell, a container, or a CI secret.
 | Env var | Default | Meaning |
 |---|---|---|
 | `VAULT_PATH` | `../vault` (resolved relative to the `pipeline/` package, i.e. the sibling `vault/` directory at the repo root) | Root of the OKF bundle this pipeline reads and writes. |
+| `CHAT_PROVIDER` | `ollama` | Which service runs the LLM-backed text skills: `ollama` (local) or `openrouter` (cloud). See [Choosing a chat provider](#choosing-a-chat-provider) — this is the one setting that decides whether vault content leaves the machine. An unrecognised value raises rather than falling back to local. |
+| `OPENROUTER_API_KEY` | *(unset)* | Required when `CHAT_PROVIDER=openrouter`; the client refuses to construct without it, rather than failing on the first skill call mid-batch. Put it in `.env` (git-ignored), never in `.env.example`. |
+| `OPENROUTER_CHAT_MODEL` | `anthropic/claude-sonnet-4.5` | OpenRouter model **slug**, not the display name — `deepseek/deepseek-v4-flash-0731`, not `DeepSeek V4 Flash 0731`. A wrong one returns a 400 whose body names the problem. |
+| `OPENROUTER_RELATEDNESS_MODEL` | same as `OPENROUTER_CHAT_MODEL` | The OpenRouter counterpart of `OLLAMA_RELATEDNESS_MODEL`, for the same reason: relatedness runs on every draft, so a cheaper model is often right. |
+| `OPENROUTER_MAX_TOKENS` | `8192` | Completion budget. Deliberately **not** shared with `OLLAMA_MAX_PREDICT_TOKENS`: that caps a local model that might never emit EOS, whereas here the budget must also cover a reasoning model's hidden tokens. Set too low, the reply comes back *empty* rather than truncated — the client says so explicitly when it does. |
+| `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Override for a proxy or a compatible endpoint. |
 | `OLLAMA_HOST` | `http://localhost:11434` | Base URL for the local Ollama API. |
-| `OLLAMA_CHAT_MODEL` | `llama3.1:8b` | Model used for every text-based skill except relatedness judgment: extraction, entity disambiguation, type classification, domain classification, quality eval. |
+| `OLLAMA_CHAT_MODEL` | `llama3.1:8b` | Model used for every text-based skill except relatedness judgment: extraction, entity disambiguation, type classification, domain classification, quality eval, prerequisite judgement. Read only when `CHAT_PROVIDER=ollama`. |
 | `OLLAMA_RELATEDNESS_MODEL` | same as `OLLAMA_CHAT_MODEL` | Model used for `RelatednessSkillPort.judge` — deciding which existing concepts a new draft should link to. Configurable separately so it can point at a smaller/cheaper local model, keeping ingest latency in check as the vault (and the number of neighbor candidates judged per draft) grows. |
-| `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | Model used for `EmbeddingPort.embed` — both indexing and search queries. |
-| `OLLAMA_VISION_MODEL` | `llava` | Model used for image captioning during `parse-sources`. Only needed if you're ingesting documents with images. |
+| `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | Model used for `EmbeddingPort.embed` — both indexing and search queries. **Always local, whatever `CHAT_PROVIDER` says**: every vector in ChromaDB was produced by this model, so changing it invalidates the index rather than improving it (a full `pipeline index` rebuild is required). |
+| `OLLAMA_VISION_MODEL` | `llava` | Model used for image captioning during `parse-sources`. Only needed if you're ingesting documents with images. **Always local**, so a provider switch never ships page images off the machine. |
 | `OLLAMA_TIMEOUT_SECONDS` | `300` | Per-request timeout passed to `httpx` for every Ollama call. |
 | `OLLAMA_MAX_PREDICT_TOKENS` | `2048` | Caps `num_predict` on every generate call, so a model stuck repeating can't hang a run indefinitely. |
 | `OLLAMA_MAX_RETRIES` | `3` | Retries on connection errors, timeouts, and 5xx responses, with exponential backoff. A 4xx is never retried. See [`OllamaClient._post`](../architecture/ports-and-adapters.md#skill-ports-applicationportsskills). |
@@ -57,6 +63,48 @@ derived from anything in the vault, so `pipeline index` cannot reconstruct
 it — back it up separately if that history matters to you. `.env` is
 git-ignored too — commit `.env.example` when you add a setting, never `.env`
 itself.
+
+## Choosing a chat provider
+
+`CHAT_PROVIDER` selects which service runs the LLM-backed skills. It is the
+only setting here with a consequence outside this machine.
+
+**`ollama` (default)** — everything stays local. Free, private, and bounded by
+what a local model can actually judge.
+
+**`openrouter`** — reaches cloud models. Skill prompts carry raw notes and
+concept bodies, so **vault content is sent to a third party**. That is why it
+is never the default and why `Settings.from_env()` logs a warning whenever it
+is in force. Cost per ingest becomes real, too.
+
+Embeddings and image captioning are unaffected either way (see the table).
+
+### Why the option exists
+
+The prerequisite gate (RF1.3) is measured against a human-labelled gold set
+with `pipeline eval-prerequisites`. On `llama3.1:8b` it scored **0.517
+precision** where the bar to ship is 0.9, and the per-rubric breakdown showed
+the decisive criterion separating true from false pairs by **0.007** — no
+threshold, veto, or min-bar rollup got near the bar, because the limit was the
+model's judgement rather than how its scores were combined
+([issue #24](https://github.com/Wedeueis/ai-tutor/issues/24)).
+
+### Before trusting a new model
+
+Tool-calling and rubric-scoring reliability are **per-model properties,
+verified by sampling** — a single passing run proves nothing. Measure:
+
+```bash
+CHAT_PROVIDER=openrouter uv run pipeline eval-prerequisites --verbose
+```
+
+Two failure modes worth recognising, both observed:
+
+- **Empty content.** A reasoning model can spend its whole completion budget
+  on hidden reasoning and return nothing. Raise `OPENROUTER_MAX_TOKENS`.
+- **A model that says yes to everything.** Watch `emitted as requires` against
+  `pairs`: a gate emitting an edge for nearly every pair has stopped
+  discriminating, whatever its precision happens to be.
 
 ## Logging
 
