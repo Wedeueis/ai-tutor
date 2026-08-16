@@ -168,9 +168,17 @@ class MergeDecision:
 
 @dataclass(frozen=True)
 class RejectDecision:
-    """A merge addition that failed its quality eval and was therefore NOT
-    applied to the existing target concept. Scoped to merges only — brand-new
-    drafts are never rejected outright, see CreateDecision."""
+    """A draft that was not written. Two causes, and they are different in kind:
+
+    - **A merge addition that failed its quality eval** — not applied to the
+      existing target concept, which is left as it was.
+    - **A draft judged not to belong in this bundle** (RF1.6) — redundant with
+      something already here, or off-topic. Note this is about *fit*, not
+      quality: a well-written note about the wrong subject is rejected here
+      and would have passed every intrinsic rubric.
+
+    Quality alone still never rejects a brand-new draft — a failing eval only
+    withholds `domain` (see CreateDecision)."""
 
     source_raw_id: str
     rationale: str

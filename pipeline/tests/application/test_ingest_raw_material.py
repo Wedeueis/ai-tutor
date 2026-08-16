@@ -29,6 +29,7 @@ from tests.application.fakes import (
     FakeQualityEvalSkill,
     FakeRawMaterialRepository,
     FakeRelatednessSkill,
+    FakeRelevanceEvidence,
     FakeTypeClassificationSkill,
     FakeVectorSearch,
 )
@@ -49,6 +50,7 @@ def _build(
     source_concepts=None,
     prerequisite_skill=None,
     prerequisite_rubrics=None,
+    relevance_evidence=None,
 ):
     concept_repository = FakeConceptRepository()
     for concept in existing_concepts or []:
@@ -76,6 +78,7 @@ def _build(
         quality_eval=FakeQualityEvalSkill(scores),
         relatedness=FakeRelatednessSkill(relatedness_verdict),
         prerequisite_judgement=prerequisite_skill or FakePrerequisiteJudgementSkill(),
+        relevance_evidence=relevance_evidence or FakeRelevanceEvidence(),
         eval_rubrics_repository=FakeEvalRubricsRepository(
             base_rubrics=[RUBRIC],
             named_rubrics={"prerequisites": prerequisite_rubrics or []},
@@ -710,3 +713,45 @@ def test_no_credibility_score_is_ever_written():
         "last_modified",
     }
     assert source.usage_count is None  # episodic; lives in `tutor`, never here
+
+
+def test_a_relevance_rejection_is_recorded_in_the_bundle_log():
+    """The rationale is all that survives a rejected draft — the concept is
+    never written, so the log is the only place a human can see what was
+    dropped and disagree with it (RF1.6)."""
+    from pipeline.domain.relevance import RelevanceEvidence
+    from tests.application.fakes import FakeRelevanceEvidence
+
+    existing = Concept(
+        id=ConceptId("qubits"),
+        frontmatter=Frontmatter(type="Metric", title="Qubits"),
+        body="About qubits.",
+    )
+    raw = RawItem(id="raw-1", content="Quantum computers use qubits.")
+    draft = DraftConcept(
+        frontmatter=Frontmatter(type="Unclassified", title="Qubits, again"),
+        body="Quantum computers use qubits.",
+        source_raw_id="raw-1",
+    )
+    use_case, concept_repository, _, bundle_log = _build(
+        [raw],
+        {"raw-1": [draft]},
+        existing_concepts=[existing],
+        disambiguation_verdict=DisambiguationVerdict(same_as=None, confidence=0.1),
+        relevance_evidence=FakeRelevanceEvidence(
+            RelevanceEvidence(
+                bundle_size=50, nearest_similarity=0.99, nearest_concept_id="qubits"
+            )
+        ),
+    )
+
+    outcomes = use_case.run()
+
+    assert outcomes[0].created == []
+    assert "already covered by qubits" in outcomes[0].rejected[0]
+    assert any(
+        entry["action"] == "reject" and "already covered by qubits" in entry["message"]
+        for entry in bundle_log.entries
+    )
+    # The draft was not written, and no score reached the vault.
+    assert list(concept_repository.concepts) == ["qubits"]

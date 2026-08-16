@@ -56,6 +56,9 @@ from pipeline.application.use_cases.knowledge_agent import KnowledgeAgent
 from pipeline.application.use_cases.parse_source_documents import ParseSourceDocuments
 from pipeline.application.use_cases.prune_stale_intake import PruneStaleIntake
 from pipeline.application.use_cases.rebuild_index import RebuildIndex
+from pipeline.application.use_cases.relevance_evidence_gatherer import (
+    RelevanceEvidenceGatherer,
+)
 from pipeline.application.use_cases.scan_intake import ScanIntake
 from pipeline.application.use_cases.search_concepts import SearchConcepts
 from pipeline.application.use_cases.trace_lineage import TraceLineage
@@ -155,6 +158,11 @@ class Container:
         self.audit_concept_quality = AuditConceptQuality(
             self.concept_repository, self.quality_audit_skill
         )
+        self.relevance_evidence = RelevanceEvidenceGatherer(
+            metadata_repository=self.metadata_repository,
+            concept_repository=self.concept_repository,
+            raw_material_repository=self.raw_material_repository,
+        )
         self.knowledge_agent = KnowledgeAgent(
             extraction=self.extraction_skill,
             embedding=self.embedding,
@@ -166,6 +174,7 @@ class Container:
             quality_eval=self.quality_eval_skill,
             relatedness=self.relatedness_skill,
             prerequisite_judgement=self.prerequisite_judgement_skill,
+            relevance_evidence=self.relevance_evidence,
             eval_rubrics_repository=self.eval_rubrics_repository,
             metadata_repository=self.metadata_repository,
             concept_repository=self.concept_repository,

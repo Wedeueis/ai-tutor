@@ -15,6 +15,7 @@ from pipeline.application.ports.concept_repository import ConceptRepositoryPort
 from pipeline.application.ports.embedding import EmbeddingPort
 from pipeline.application.ports.eval_rubrics_repository import EvalRubricsRepositoryPort
 from pipeline.application.ports.metadata_repository import MetadataRepositoryPort
+from pipeline.application.ports.relevance_evidence import RelevanceEvidencePort
 from pipeline.application.ports.skills.category_classification import (
     CategoryClassificationSkillPort,
 )
@@ -59,6 +60,7 @@ from pipeline.domain.prerequisites import (
     select_prerequisites,
 )
 from pipeline.domain.raw_material import RawItem
+from pipeline.domain.relevance import judge_relevance
 from pipeline.domain.slug import slugify
 
 DEFAULT_DISAMBIGUATION_CONFIDENCE_THRESHOLD = 0.75
@@ -86,6 +88,7 @@ class KnowledgeAgent:
         quality_eval: QualityEvalSkillPort,
         relatedness: RelatednessSkillPort,
         prerequisite_judgement: PrerequisiteJudgementSkillPort,
+        relevance_evidence: RelevanceEvidencePort,
         eval_rubrics_repository: EvalRubricsRepositoryPort,
         metadata_repository: MetadataRepositoryPort,
         concept_repository: ConceptRepositoryPort,
@@ -106,6 +109,7 @@ class KnowledgeAgent:
         self._quality_eval = quality_eval
         self._relatedness = relatedness
         self._prerequisite_judgement = prerequisite_judgement
+        self._relevance_evidence = relevance_evidence
         self._eval_rubrics_repository = eval_rubrics_repository
         self._metadata_repository = metadata_repository
         self._concept_repository = concept_repository
@@ -160,6 +164,21 @@ class KnowledgeAgent:
                         s.rationale for s in eval_result.scores if s.rationale
                     ) or "quality eval below threshold"
                     decisions.append(RejectDecision(source_raw_id=raw.id, rationale=rationale))
+                continue
+
+            # Fit to the bundle (RF1.6). Judged only on the create path: a
+            # merge folds into a concept that already earned its place, so
+            # redundancy is the point rather than a reason to reject. Runs
+            # before the remaining skills, since a draft that doesn't belong
+            # shouldn't cost a type classification and five prerequisite calls.
+            relevance = judge_relevance(
+                self._relevance_evidence.gather(draft, candidates, raw.source_id)
+            )
+            if not relevance.accepted:
+                logger.info("knowledge_agent: rejected as irrelevant — %s", relevance.reason)
+                decisions.append(
+                    RejectDecision(source_raw_id=raw.id, rationale=relevance.reason)
+                )
                 continue
 
             known_types = self._metadata_repository.list_distinct_types(

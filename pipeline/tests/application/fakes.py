@@ -20,6 +20,7 @@ from pipeline.domain.eval import Rubric, RubricScore
 from pipeline.domain.intake import IntakeItem, IntakeKind, IntakeState
 from pipeline.domain.prerequisites import PrerequisiteAssessment
 from pipeline.domain.raw_material import RawItem
+from pipeline.domain.relevance import RelevanceEvidence
 from pipeline.domain.source_document import ParsedDocument
 
 
@@ -333,11 +334,20 @@ class FakeMetadataRepository:
         return self.known_types
 
     def find_ids_by_type(self, concept_type: str, domain: str | None = None) -> list[str]:
-        if concept_type == "Domain":
-            return self.domain_ids
-        if concept_type == "Category":
-            return self.category_ids
-        return []
+        """The explicit `domain_ids`/`category_ids` a test declared, *plus*
+        anything upserted with that type — the real index knows every concept's
+        type, so special-casing two of them would hide a caller that asks about
+        any other (MOC, Source Document) behind a silent empty list."""
+        declared = {
+            "Domain": self.domain_ids,
+            "Category": self.category_ids,
+        }.get(concept_type, [])
+        upserted = [
+            concept_id
+            for concept_id, concept in self.upserted.items()
+            if concept.frontmatter.type == concept_type
+        ]
+        return list(dict.fromkeys([*declared, *upserted]))
 
     def find_links(self, concept_id: str) -> LinkGraph:
         return LinkGraph(concept_id=concept_id)
@@ -410,3 +420,17 @@ class FakeImageCaptioning:
 
     def caption(self, image) -> str:
         return self._captions_by_anchor.get(image.anchor, "a captioned image")
+
+
+class FakeRelevanceEvidence:
+    """Canned evidence. Defaults to a bundle too small for the topicality floor
+    and no nearest match, i.e. "accept" — so a test that isn't about relevance
+    doesn't have to think about it."""
+
+    def __init__(self, evidence: RelevanceEvidence | None = None) -> None:
+        self._evidence = evidence or RelevanceEvidence(bundle_size=0)
+        self.calls: list[str | None] = []
+
+    def gather(self, draft, candidates, source_id=None) -> RelevanceEvidence:
+        self.calls.append(source_id)
+        return self._evidence

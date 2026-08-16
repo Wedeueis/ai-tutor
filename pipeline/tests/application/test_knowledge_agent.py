@@ -5,6 +5,7 @@ from pipeline.domain.agent import (
     DisambiguationVerdict,
     DomainClassificationVerdict,
     DraftConcept,
+    RejectDecision,
     TypeClassificationVerdict,
 )
 from pipeline.domain.concept import Concept, ConceptId, Frontmatter
@@ -22,6 +23,7 @@ from tests.application.fakes import (
     FakePrerequisiteJudgementSkill,
     FakeQualityEvalSkill,
     FakeRelatednessSkill,
+    FakeRelevanceEvidence,
     FakeTypeClassificationSkill,
     FakeVectorSearch,
 )
@@ -56,6 +58,7 @@ def _agent(
     category_verdict=None,
     prerequisite_skill=None,
     prerequisite_rubrics=None,
+    relevance_evidence=None,
 ):
     kwargs = {}
     if relatedness_min_score is not None:
@@ -73,6 +76,7 @@ def _agent(
         quality_eval=FakeQualityEvalSkill(scores),
         relatedness=FakeRelatednessSkill(relatedness_verdict),
         prerequisite_judgement=prerequisite_skill or FakePrerequisiteJudgementSkill(),
+        relevance_evidence=relevance_evidence or FakeRelevanceEvidence(),
         eval_rubrics_repository=eval_rubrics_repository or FakeEvalRubricsRepository(
             base_rubrics=[RUBRIC],
             named_rubrics={"prerequisites": prerequisite_rubrics or []},
@@ -231,6 +235,7 @@ def test_related_but_not_merged_candidate_gets_linked_into_body():
             )
         ),
         prerequisite_judgement=FakePrerequisiteJudgementSkill(),
+        relevance_evidence=FakeRelevanceEvidence(),
         eval_rubrics_repository=FakeEvalRubricsRepository(base_rubrics=[RUBRIC]),
         metadata_repository=FakeMetadataRepository(known_types=["Playbook"]),
         concept_repository=concept_repository,
@@ -423,6 +428,7 @@ def test_eval_rubrics_fall_back_to_base_when_domain_has_none():
         quality_eval=CapturingQualityEval(),
         relatedness=FakeRelatednessSkill(),
         prerequisite_judgement=FakePrerequisiteJudgementSkill(),
+        relevance_evidence=FakeRelevanceEvidence(),
         eval_rubrics_repository=FakeEvalRubricsRepository(base_rubrics=[base_rubric]),
         metadata_repository=FakeMetadataRepository(domain_ids=[str(domain_id)]),
         concept_repository=concept_repository,
@@ -466,6 +472,7 @@ def test_eval_rubrics_use_domain_specific_file_when_present():
         quality_eval=CapturingQualityEval(),
         relatedness=FakeRelatednessSkill(),
         prerequisite_judgement=FakePrerequisiteJudgementSkill(),
+        relevance_evidence=FakeRelevanceEvidence(),
         eval_rubrics_repository=FakeEvalRubricsRepository(
             rubrics_by_domain={str(domain_id): [domain_rubric]}
         ),
@@ -617,3 +624,82 @@ def test_prerequisite_candidates_are_not_filtered_by_the_relatedness_min_score()
 
     assert skill.calls[0][1] == ["water-temperature"]
     assert "requires:: [[/water-temperature]]" in decision.concept.body
+
+
+# --- relevance: fit to the bundle (RF1.6) --------------------------------
+
+
+def _irrelevant():
+    from pipeline.domain.relevance import RelevanceEvidence
+    from tests.application.fakes import FakeRelevanceEvidence
+
+    return FakeRelevanceEvidence(
+        RelevanceEvidence(bundle_size=50, nearest_similarity=0.99, nearest_concept_id="qubits")
+    )
+
+
+def test_a_draft_that_does_not_fit_the_bundle_is_rejected_rather_than_created():
+    agent = _agent(
+        {"r1": [_draft("r1")]},
+        DisambiguationVerdict(same_as=None, confidence=0.0),
+        relevance_evidence=_irrelevant(),
+    )
+
+    decision = agent.run(RawItem(id="r1", content="...")).decisions[0]
+
+    assert isinstance(decision, RejectDecision)
+    assert "already covered by qubits" in decision.rationale
+
+
+def test_a_relevance_rejection_skips_the_remaining_skills():
+    """A draft that doesn't belong shouldn't cost a type classification and
+    five prerequisite calls."""
+    from tests.application.fakes import FakePrerequisiteJudgementSkill
+
+    skill = FakePrerequisiteJudgementSkill({})
+    agent = _agent(
+        {"r1": [_draft("r1")]},
+        DisambiguationVerdict(same_as=None, confidence=0.0),
+        relevance_evidence=_irrelevant(),
+        prerequisite_skill=skill,
+        prerequisite_rubrics=PREREQ_RUBRICS,
+    )
+
+    agent.run(RawItem(id="r1", content="..."))
+
+    assert skill.calls == []
+
+
+def test_relevance_is_not_judged_on_the_merge_path():
+    """A merge folds into a concept that already earned its place, so being
+    similar to it is the point rather than a reason to reject."""
+    existing_id = ConceptId("qubits")
+    evidence = _irrelevant()
+    agent = _agent(
+        {"r1": [_draft("r1")]},
+        DisambiguationVerdict(same_as=existing_id, confidence=0.95),
+        candidates=[CandidateMatch(concept_id=existing_id, score=0.99)],
+        relevance_evidence=evidence,
+    )
+
+    decision = agent.run(RawItem(id="r1", content="...")).decisions[0]
+
+    assert decision.into == existing_id
+    assert evidence.calls == []  # never even consulted
+
+
+def test_the_raw_items_source_is_passed_through_for_credibility_signals():
+    """The draft cannot carry its own provenance: `sources[]` is stamped after
+    the agent runs."""
+    from tests.application.fakes import FakeRelevanceEvidence
+
+    evidence = FakeRelevanceEvidence()
+    agent = _agent(
+        {"r1": [_draft("r1")]},
+        DisambiguationVerdict(same_as=None, confidence=0.0),
+        relevance_evidence=evidence,
+    )
+
+    agent.run(RawItem(id="r1", content="...", source_id="source-1"))
+
+    assert evidence.calls == ["source-1"]
