@@ -8,7 +8,11 @@ requires-python = ">=3.12"
 # pipeline's MCP server (PRD v3 §2, rule 1) — no Python import, no shared
 # virtualenv, no shared SQLite file. The two must evolve on independent cycles.
 dependencies = [
-    "google-adk>=1.0.0",
+    # `[db]` is `DatabaseSessionService` (§7): ADK's session store is its own
+    # SQLite file, deliberately not `learner.db`. ADK is pre-1.0 in spirit and
+    # its session schema will churn; the review history is the one thing here
+    # that cannot be regenerated, so it does not live in the same file.
+    "google-adk[db]>=1.0.0",
     "litellm>=1.0.0",
     # Matches `agent/`, not `pipeline/` (which pins >=2.0.0): tutor is an MCP
     # *client*, so it follows the client-side pin the ADK toolset is known to

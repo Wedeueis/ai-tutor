@@ -25,6 +25,18 @@ Tool-calling reliability is a per-model property verified by *sampling*
 not the model already known to fail."""
 
 
+LOCAL_PROVIDER = "ollama_chat"
+"""`ollama_chat/<model>`, not `ollama/<model>` — the latter has documented
+tool-loop and context bugs in LiteLLM's Ollama integration, and every teaching
+turn is a tool-calling path."""
+
+KNOWN_BAD_TOOL_CALLERS = frozenset({"llama3.1:8b"})
+"""Models measured to fail the tool-calling path outright (NFR2, #12): 0/6 real
+calls once the system prompt mentions tools. Not a blocklist — configuring one
+is the operator's call — but it is worth saying out loud, because the failure
+looks like the model *narrating* tool calls in prose rather than erroring."""
+
+
 @dataclass(frozen=True)
 class Settings:
     ollama_host: str
@@ -32,6 +44,30 @@ class Settings:
     pipeline_mcp_url: str
     learner_db_path: Path
     session_db_url: str
+
+    @property
+    def litellm_model(self) -> str:
+        """The model string LiteLLM is given — the whole of NFR1's seam.
+
+        A bare name (`qwen3.5:4b`) is local and gets the Ollama prefix; anything
+        already naming a provider (`openrouter/deepseek/deepseek-chat`) is
+        passed through untouched. That is what makes #19's swap a matter of
+        setting one environment variable rather than editing code."""
+        if "/" in self.chat_model:
+            return self.chat_model
+        return f"{LOCAL_PROVIDER}/{self.chat_model}"
+
+    @property
+    def model_api_base(self) -> str | None:
+        """`ollama_host` for a local model, and nothing for a hosted one —
+        pointing a hosted provider at localhost would fail in a confusing way."""
+        if self.litellm_model.startswith(f"{LOCAL_PROVIDER}/"):
+            return self.ollama_host
+        return None
+
+    @property
+    def model_is_known_bad_at_tool_calling(self) -> bool:
+        return self.chat_model in KNOWN_BAD_TOOL_CALLERS
 
     @classmethod
     def from_env(cls) -> Settings:

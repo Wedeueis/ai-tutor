@@ -92,3 +92,23 @@ Integration tests need Ollama running locally and `pipeline`'s MCP server
 **Do not default to `llama3.1:8b`.** Measured at 0/6 real tool calls once the
 system prompt mentions tools, against 6/6 for `qwen3.5:4b` on the same probe
 (issue #12). Every teaching turn is a tool-calling path.
+
+`tests/test_agent.py` carries a **sampled** probe for exactly this, because a
+single passing run proves nothing about a nondeterministic property:
+
+```bash
+uv run pytest -m integration tests/test_agent.py     # needs Ollama + the MCP server
+TUTOR_PROBE_SAMPLES=12 uv run pytest -m integration tests/test_agent.py
+```
+
+## The model
+
+One environment variable, because that is the whole of the provider seam:
+
+```bash
+TUTOR_CHAT_MODEL=qwen3.5:4b                         # local (the default)
+TUTOR_CHAT_MODEL=openrouter/deepseek/deepseek-chat  # hosted, no code change
+```
+
+A bare name is local and gets Ollama's `ollama_chat/` prefix; anything already
+naming a provider passes through untouched and is not pointed at localhost.
