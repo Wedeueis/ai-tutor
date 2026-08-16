@@ -1,0 +1,166 @@
+"""Composition root: the only place `tutor`'s concrete adapters — the SQLite
+learner store and the MCP vault client — get wired to the application's ports.
+
+The commands here are thin on purpose. `depth set` exists because RF3.3 is
+explicit that depth targets need "a CLI or conversational way to set one, or
+the feature is unusable": `set_depth_target` has existed since Task 1.2 with
+nothing able to call it. `plan` and `session` exist because a projection you
+cannot look at is very hard to trust — they print exactly what the teaching
+loop will consume.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass
+from datetime import UTC, datetime
+
+import typer
+
+from tutor.adapters.mcp.vault import McpVault
+from tutor.adapters.sqlite.learner_store import SqliteLearnerStore
+from tutor.application.session import DEFAULT_SESSION_SIZE, Session, compose_session
+from tutor.application.study_plan import (
+    DEFAULT_MAX_HOPS,
+    PlanItem,
+    StudyPlan,
+    StudyPlanner,
+)
+from tutor.config import Settings
+from tutor.domain.depth import DepthLevel, requirement_for
+from tutor.domain.scheduling import ALGORITHM, PARAMETERS_ID, calculate_next_review
+
+app = typer.Typer(help="The stateful AI Tutor over the OKF vault.")
+depth_app = typer.Typer(help="How deep to go in a Category, and what that asks for.")
+app.add_typer(depth_app, name="depth")
+
+
+@dataclass
+class Container:
+    settings: Settings
+    learner_store: SqliteLearnerStore
+
+    def vault(self) -> McpVault:
+        return McpVault(self.settings.pipeline_mcp_url)
+
+
+def _container() -> Container:
+    settings = Settings.from_env()
+    settings.learner_db_path.parent.mkdir(parents=True, exist_ok=True)
+    return Container(
+        settings=settings,
+        learner_store=SqliteLearnerStore(
+            settings.learner_db_path,
+            # The scheduling identity is declared here, by the composition
+            # root, rather than hardcoded in the store — a checkpoint is valid
+            # only for the exact pair that produced it, so the pair has to be
+            # something a caller states.
+            scheduler=calculate_next_review,
+            algorithm=ALGORITHM,
+            parameters=PARAMETERS_ID,
+        ),
+    )
+
+
+# --- depth targets --------------------------------------------------------
+
+
+@depth_app.command("set")
+def depth_set(category_id: str, level: DepthLevel) -> None:
+    """Declare how deep to go in one Category.
+
+    The Category is a vault concept id (`categories/graph-rag`); it is not
+    validated against the vault on purpose, so a target can be set for a
+    Category that ingest has not produced yet. A target for a Category that
+    never appears is inert, not an error."""
+    container = _container()
+    container.learner_store.set_depth_target(category_id, level)
+    requirement = requirement_for(level)
+    typer.echo(f"{category_id}: {level.value}")
+    typer.echo(f"  {requirement.description}")
+    typer.echo(f"  threshold: {requirement.stability_days:g} days of stability")
+    if requirement.requires_discursive:
+        typer.echo("  evidence: needs a graded free-text answer, not just recall")
+
+
+@depth_app.command("show")
+def depth_show(category_id: str | None = typer.Argument(default=None)) -> None:
+    """Show one Category's target, or every target that was actually declared.
+
+    An untargeted Category answers `aware` — and it says so, because a learner
+    has to be able to tell "I chose aware" from "nobody ever set this" (#20)."""
+    container = _container()
+    declared = container.learner_store.depth_targets()
+
+    if category_id is not None:
+        level = container.learner_store.depth_target(category_id)
+        origin = "declared" if category_id in declared else "default, never set"
+        typer.echo(f"{category_id}: {level.value}  ({origin})")
+        return
+
+    if not declared:
+        typer.echo("No depth targets set. Every Category defaults to `aware`.")
+        return
+    for category, level in declared.items():
+        typer.echo(f"{category}: {level.value}")
+
+
+# --- the plan -------------------------------------------------------------
+
+
+@app.command()
+def plan(concept_id: str, max_hops: int = DEFAULT_MAX_HOPS) -> None:
+    """Print the study plan for a goal concept.
+
+    Nothing is stored: this recomputes from the prerequisite graph, the review
+    log and the depth targets every time it runs (RF3.1)."""
+    projection = asyncio.run(_plan(concept_id, max_hops))
+    if not projection:
+        typer.echo(f"Nothing to study for {concept_id} — everything is at target.")
+        return
+    for item in projection:
+        typer.echo(_line(item))
+
+
+@app.command()
+def session(
+    concept_id: str,
+    size: int = DEFAULT_SESSION_SIZE,
+    max_hops: int = DEFAULT_MAX_HOPS,
+) -> None:
+    """Print one session's worth of work: due-and-under-target first, then the
+    rest of the under-target work, then new ground (RF3.4)."""
+    now = datetime.now(UTC)
+    composed: Session = compose_session(
+        asyncio.run(_plan(concept_id, max_hops)), size=size, now=now
+    )
+    if not composed:
+        typer.echo(f"Nothing to study for {concept_id} right now.")
+        return
+    for item in composed:
+        typer.echo(_line(item, now=now))
+
+
+async def _plan(concept_id: str, max_hops: int) -> StudyPlan:
+    container = _container()
+    vault = container.vault()
+    try:
+        return await StudyPlanner(
+            vault, container.learner_store, max_hops=max_hops
+        ).plan(concept_id)
+    finally:
+        await vault.aclose()
+
+
+def _line(item: PlanItem, now: datetime | None = None) -> str:
+    marks = [item.kind.value, item.target.value]
+    if item.due is not None:
+        overdue = now is not None and item.due <= now
+        marks.append(f"due {item.due.date().isoformat()}{' (overdue)' if overdue else ''}")
+    if item.blocked:
+        marks.append(f"blocked by {', '.join(item.unmet_prerequisites)}")
+    return f"{item.concept_id}  [{'; '.join(marks)}]"
+
+
+if __name__ == "__main__":  # pragma: no cover
+    app()

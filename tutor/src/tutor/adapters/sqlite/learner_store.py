@@ -243,6 +243,22 @@ class SqliteLearnerStore:
             # study plan unbuildable.
             return DEFAULT_DEPTH_LEVEL
 
+    def depth_targets(self) -> dict[str, DepthLevel]:
+        """Every target the learner actually declared.
+
+        Not on the port, for the same reason `events` is not: the port is about
+        answering "what is the target for this Category", and it answers `aware`
+        for a Category nobody ever touched. This distinguishes the two, which is
+        what "show me my targets" needs — a learner has to be able to tell "I
+        chose aware" from "nobody ever set this" (#20)."""
+        return {
+            row["category_id"]: DepthLevel(row["level"])
+            for row in self._connection.execute(
+                "SELECT category_id, level FROM depth_targets ORDER BY category_id"
+            )
+            if row["level"] in {level.value for level in DepthLevel}
+        }
+
     def set_depth_target(self, category_id: str, level: DepthLevel) -> None:
         self._connection.execute(
             """

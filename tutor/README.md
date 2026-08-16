@@ -39,6 +39,28 @@ src/tutor/
 └── adapters/                    sqlite/ (learner.db), mcp/ (the vault)
 ```
 
+## Using it
+
+```bash
+uv run tutor depth set categories/graph-rag specialist
+uv run tutor depth show                 # only what was actually declared
+uv run tutor depth show categories/x    # ...and whether it was ever declared
+
+uv run tutor plan /concepts/attention      # needs pipeline's MCP server
+uv run tutor session /concepts/attention   # one sitting's worth of it
+```
+
+A depth target is bound to a **Category**, which is the granularity that
+expresses "specialise in GraphRAG, stay aware of the rest of ML". A Category
+nobody has targeted answers `aware` — the default is deliberate, not a
+placeholder: new Categories arrive from ingest unseen, and defaulting to depth
+would commit the learner to study they never chose.
+
+The plan is **never stored**. It is projected from *(prerequisite graph, review
+log, depth targets)* each time you ask, which is why it re-routes on its own: a
+prerequisite answered badly is simply under target again the next time it is
+built. There is nothing to invalidate.
+
 ## State
 
 Two SQLite files, both owned by `tutor`:

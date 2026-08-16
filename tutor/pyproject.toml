@@ -18,7 +18,13 @@ dependencies = [
     # vault adapter parses OKF frontmatter itself. `pipeline` owns writing it;
     # this only ever reads.
     "pyyaml>=6.0.3",
+    # The CLI. Same choice as `pipeline`, so the two deployables' commands feel
+    # like one system from a terminal even though they share no code.
+    "typer>=0.27.1",
 ]
+
+[project.scripts]
+tutor = "tutor.cli.main:app"
 
 [build-system]
 requires = ["uv_build>=0.8.15,<0.9.0"]
