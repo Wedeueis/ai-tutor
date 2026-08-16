@@ -10,6 +10,7 @@ Nothing on this port takes a `user_id`. There is exactly one learner."""
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Protocol
 
 from tutor.domain.depth import DepthLevel
@@ -58,6 +59,15 @@ class LearnerStorePort(Protocol):
         (RF4.4). Explaining something in your own words is different evidence
         from recognising it, and nothing in a stability number distinguishes
         them."""
+        ...
+
+    def due_concepts(self, at: datetime, limit: int | None = None) -> list[str]:
+        """Everything scheduled for `at` or earlier, most overdue first.
+
+        This is the seeding for `tutor review` — the primary loop of any
+        spaced-repetition system, and the one thing Phase 4's goal-rooted
+        planning could not express: a concept overdue but off the path to
+        whatever you named was stranded (#39)."""
         ...
 
     def replay(self, concept_id: str | None = None) -> None:

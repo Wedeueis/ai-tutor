@@ -1,12 +1,19 @@
 """Composition root: the only place `tutor`'s concrete adapters — the SQLite
 learner store and the MCP vault client — get wired to the application's ports.
 
-The commands here are thin on purpose. `depth set` exists because RF3.3 is
-explicit that depth targets need "a CLI or conversational way to set one, or
-the feature is unusable": `set_depth_target` has existed since Task 1.2 with
-nothing able to call it. `plan` and `session` exist because a projection you
-cannot look at is very hard to trust — they print exactly what the teaching
-loop will consume.
+The commands here are thin on purpose. `review` and `teach` run a session and
+own no logic beyond building the adapters — the loop lives in
+`application/teaching.py`, which is what keeps it testable without ADK. `plan`
+and `session` print what those two will consume, because a projection nobody
+can look at is very hard to trust. `depth set` exists because RF3.3 is explicit
+that depth targets need "a CLI or conversational way to set one, or the feature
+is unusable": `set_depth_target` had existed since Task 1.2 with nothing able to
+call it.
+
+**`review` is the primary loop, not `teach`.** "Keep what I know from rotting"
+is the request a spaced-repetition system exists to serve; "take me toward X"
+is the one that needs the graph. They are separate commands because one serving
+both would compromise both (#39).
 """
 
 from __future__ import annotations
@@ -17,14 +24,24 @@ from datetime import UTC, datetime
 
 import typer
 
+from tutor.adapters.adk.turn import AdkTeachingTurn
+from tutor.adapters.llm.assessment import LiteLlmAssessmentSkill
 from tutor.adapters.mcp.vault import McpVault
 from tutor.adapters.sqlite.learner_store import SqliteLearnerStore
+from tutor.agent import build_session_service
+from tutor.application.review import ConductReview
 from tutor.application.session import DEFAULT_SESSION_SIZE, Session, compose_session
 from tutor.application.study_plan import (
     DEFAULT_MAX_HOPS,
     PlanItem,
     StudyPlan,
     StudyPlanner,
+)
+from tutor.application.teaching import (
+    DEFAULT_VISIT_CAP,
+    SessionReport,
+    TeachSession,
+    due_seed,
 )
 from tutor.config import Settings
 from tutor.domain.depth import DepthLevel, requirement_for
@@ -139,6 +156,84 @@ def session(
         return
     for item in composed:
         typer.echo(_line(item, now=now))
+
+
+@app.command()
+def review(size: int = DEFAULT_SESSION_SIZE, cap: int = DEFAULT_VISIT_CAP) -> None:
+    """Review everything that is due — the primary loop.
+
+    No goal and no graph walk: every concept here has been studied before, so
+    prerequisite ordering has nothing to contribute (#39)."""
+    asyncio.run(_run_session(_due_seed(size), size=size, cap=cap))
+
+
+@app.command()
+def teach(
+    concept_id: str,
+    size: int = DEFAULT_SESSION_SIZE,
+    cap: int = DEFAULT_VISIT_CAP,
+    max_hops: int = DEFAULT_MAX_HOPS,
+) -> None:
+    """Work toward a concept: prerequisites first, then the concept itself."""
+    asyncio.run(
+        _run_session(_plan_seed(concept_id, size, max_hops), size=size, cap=cap)
+    )
+
+
+async def _due_seed(size: int) -> list[str]:
+    return await due_seed(_container().learner_store, limit=size)
+
+
+async def _plan_seed(concept_id: str, size: int, max_hops: int) -> list[str]:
+    projection = await _plan(concept_id, max_hops)
+    return [item.concept_id for item in compose_session(projection, size=size)]
+
+
+async def _run_session(seed_awaitable, *, size: int, cap: int) -> None:
+    """Composition root for a session: every adapter is built here and nowhere
+    else, which is what keeps `application/teaching.py` free of ADK."""
+    seed = await seed_awaitable
+    if not seed:
+        typer.echo("Nothing to study right now.")
+        return
+
+    container = _container()
+    vault = container.vault()
+    turns = AdkTeachingTurn(
+        session_service=build_session_service(container.settings),
+        session_id=f"tutor-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}",
+        settings=container.settings,
+    )
+    assessments = LiteLlmAssessmentSkill(
+        container.settings.litellm_model, container.settings.model_api_base
+    )
+    session = TeachSession(
+        vault,
+        container.learner_store,
+        ConductReview(vault, container.learner_store, assessments),
+        turns,
+        visit_cap=cap,
+    )
+
+    typer.echo(f"{len(seed)} concept(s) this session. `/skip` to pass, `/quit` to stop.\n")
+    try:
+        report = await session.run(seed)
+    finally:
+        await vault.aclose()
+    _report(report)
+
+
+def _report(report: SessionReport) -> None:
+    """Printed, never stored. There is no `sessions` table — every review was
+    committed as it happened (#39)."""
+    typer.echo("")
+    if report.abandoned:
+        typer.echo("Stopped early. Everything answered before that is recorded.")
+    typer.echo(f"reviewed  {len(report.reviewed)}")
+    if report.skipped:
+        typer.echo(f"skipped   {', '.join(report.skipped)}")
+    if report.ungraded:
+        typer.echo(f"ungraded  {', '.join(report.ungraded)} (grader failed; nothing recorded)")
 
 
 async def _plan(concept_id: str, max_hops: int) -> StudyPlan:

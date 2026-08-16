@@ -48,13 +48,31 @@ src/tutor/
 ## Using it
 
 ```bash
+uv run tutor review                     # everything due — the primary loop
+uv run tutor teach concepts/attention   # toward a goal: prerequisites first
+
 uv run tutor depth set categories/graph-rag specialist
 uv run tutor depth show                 # only what was actually declared
 uv run tutor depth show categories/x    # ...and whether it was ever declared
 
-uv run tutor plan /concepts/attention      # needs pipeline's MCP server
-uv run tutor session /concepts/attention   # one sitting's worth of it
+uv run tutor plan concepts/attention      # what a session would work through
+uv run tutor session concepts/attention   # one sitting's worth of it
 ```
+
+`review` and `teach` are separate because "keep what I know from rotting" and
+"take me toward X" are different requests. `review` needs no graph walk at all —
+everything in it has been studied before.
+
+**A session is a queue, not a list.** Fail a concept and it comes back in the
+same sitting (capped at three attempts), because FSRS's learning steps are one
+and ten minutes and re-testing a failure while it is still cheap to fix is the
+point. Your **first, unassisted answer** is what gets graded and recorded;
+everything the tutor says afterwards is teaching and moves nothing. `/skip`
+passes on a concept and writes nothing at all — "I don't know" is an answer,
+and it is graded.
+
+Nothing about a session is stored. Every review commits as it happens, so
+closing the terminal halfway is indistinguishable from finishing.
 
 A depth target is bound to a **Category**, which is the granularity that
 expresses "specialise in GraphRAG, stay aware of the rest of ML". A Category

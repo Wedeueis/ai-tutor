@@ -145,6 +145,38 @@ class SqliteLearnerStore:
         ).fetchone()
         return _as_scheduler_state(row) if row is not None else None
 
+    def due_concepts(self, at: datetime, limit: int | None = None) -> list[str]:
+        """Everything scheduled for `at` or earlier, most overdue first.
+
+        The whole of `tutor review`'s seeding, and deliberately **not** a graph
+        walk: every concept here has been studied before, so prerequisite
+        ordering has nothing to contribute and the plan projection would be
+        pure cost (#39).
+
+        Each candidate is re-read through `scheduler_state` before it is
+        returned, which brings its projection up to date and re-checks the due
+        date. Trusting the table directly would let a stale checkpoint — one
+        computed under parameters no longer in force — decide what the learner
+        studies today."""
+        candidates = [
+            row["concept_id"]
+            for row in self._connection.execute(
+                "SELECT concept_id FROM scheduler_state WHERE due IS NOT NULL "
+                "AND due <= ? ORDER BY due, concept_id",
+                (at.isoformat(),),
+            )
+        ]
+
+        due: list[tuple[datetime, str]] = []
+        for concept_id in candidates:
+            state = self.scheduler_state(concept_id)
+            if state is not None and state.due is not None and state.due <= at:
+                due.append((state.due, concept_id))
+
+        due.sort()  # most overdue first; ties break on id, as everywhere else
+        ordered = [concept_id for _, concept_id in due]
+        return ordered[:limit] if limit is not None else ordered
+
     def replay(self, concept_id: str | None = None) -> None:
         """Discards the cached projection and rebuilds it from the first event.
 

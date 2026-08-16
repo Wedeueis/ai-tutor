@@ -185,3 +185,29 @@ def _review(
         )
     finally:
         store.close()
+
+
+# --- the session entry points (Task 6.2) ----------------------------------
+
+
+def test_review_with_nothing_due_says_so(vault):
+    """`tutor review` is the primary loop, and an empty one is a real answer —
+    not an error, and not a session padded with work that is not due."""
+    assert "Nothing to study" in _invoke("review")
+
+
+def test_teach_with_a_goal_already_at_target_says_so(vault, tmp_path):
+    for _ in range(3):
+        _review(tmp_path, "softmax", at=datetime.now(UTC), rating=Rating.EASY)
+
+    assert "Nothing to study" in _invoke("teach", "softmax")
+
+
+def test_both_entry_points_exist_and_are_distinct():
+    """Two commands, because "keep what I know from rotting" and "take me
+    toward X" are different requests and one command serving both would
+    compromise both (#39)."""
+    help_text = runner.invoke(cli.app, ["--help"]).output
+
+    assert "review" in help_text
+    assert "teach" in help_text

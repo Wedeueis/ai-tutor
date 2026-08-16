@@ -24,7 +24,7 @@ from datetime import UTC, datetime
 
 from tutor.application.ports.outbound.assessment import Assessment, AssessmentSkillPort
 from tutor.application.ports.outbound.learner_store import LearnerStorePort
-from tutor.application.ports.outbound.vault import VaultPort
+from tutor.application.ports.outbound.vault import Concept, VaultPort
 from tutor.domain.assessment import (
     aggregate_scores,
     rating_for,
@@ -72,6 +72,16 @@ class ConductReview:
         question generated last month may be asking about text that no longer
         exists. Regenerating is what makes there be nothing to invalidate."""
         concept = await self._vault.get_concept(concept_id)
+        return await self.assess(concept, level)
+
+    async def assess(
+        self, concept: Concept, level: DepthLevel = DEFAULT_DEPTH_LEVEL
+    ) -> Assessment:
+        """`ask` for a caller that already holds the concept.
+
+        The session loop fetches it once and uses it three times — for the
+        question, for the prompt's volatile tier, and for the depth target —
+        so re-reading it here would be three round-trips where one will do."""
         return await self._assessments.generate(concept, level)
 
     async def record(
