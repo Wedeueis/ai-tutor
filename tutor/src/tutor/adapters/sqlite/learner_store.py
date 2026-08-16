@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 
 from tutor.adapters.sqlite._thread_local_connection import ThreadLocalSqliteConnection
 from tutor.domain.depth import DEFAULT_DEPTH_LEVEL, DepthLevel
-from tutor.domain.review import ReviewEvent
+from tutor.domain.review import ReviewEvent, ReviewSummary
 from tutor.domain.scheduling import Rating, SchedulerState, State
 
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
@@ -97,6 +97,32 @@ class SqliteLearnerStore:
                 (concept_id,),
             ).fetchall()
         return [_as_event(row) for row in rows]
+
+    def review_summary(self, concept_id: str) -> ReviewSummary:
+        """How often, how recently, how it went — the history the *prompt* is
+        allowed to see (RF2.7).
+
+        Read straight off the log rather than off `scheduler_state`, which is
+        not a shortcut: the projection carries stability and difficulty, and
+        reading it here would put those fields one attribute access away from a
+        prompt that must never contain them (#39)."""
+        count = self._connection.execute(
+            "SELECT COUNT(*) AS n FROM review_events WHERE concept_id = ?",
+            (concept_id,),
+        ).fetchone()["n"]
+        if not count:
+            return ReviewSummary()
+
+        last = self._connection.execute(
+            "SELECT rating, reviewed_at FROM review_events WHERE concept_id = ? "
+            "ORDER BY id DESC LIMIT 1",
+            (concept_id,),
+        ).fetchone()
+        return ReviewSummary(
+            times_seen=int(count),
+            last_reviewed_at=datetime.fromisoformat(last["reviewed_at"]),
+            last_rating=Rating(last["rating"]),
+        )
 
     def has_discursive_evidence(self, concept_id: str) -> bool:
         """Read off the log, not off a projection: it is a fact about what

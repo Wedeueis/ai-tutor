@@ -42,3 +42,18 @@ class ReviewEvent:
     """Whether this was a free-text answer graded against a rubric rather than
     a self-reported recall grade. The `specialist` depth level's evidence
     requirement needs to distinguish them (PRD v3 RF4.4)."""
+
+
+@dataclass(frozen=True)
+class ReviewSummary:
+    """A concept's history, rolled up — how often, how recently, how it went.
+
+    A projection over the log like `SchedulerState`, but a different one, for a
+    different consumer: this feeds the *prompt* (RF2.7), and the prompt must
+    never see stability or difficulty. Keeping them separate types is what
+    stops a scheduler field drifting into the tutor's context because it
+    happened to be on an object already in scope."""
+
+    times_seen: int = 0
+    last_reviewed_at: datetime | None = None
+    last_rating: Rating | None = None

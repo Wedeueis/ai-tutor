@@ -25,6 +25,7 @@ problem `tutor` does not have, since the pedagogy set is known at startup.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from pathlib import Path
 
 from google.adk.agents import LlmAgent
@@ -37,6 +38,7 @@ from google.adk.tools.mcp_tool.mcp_session_manager import (
 from tutor.application.harness import HermesDomainOrchestrator
 from tutor.application.ports.outbound.vault import Concept
 from tutor.config import Settings
+from tutor.domain.learner_context import LearnerContext
 
 logger = logging.getLogger(__name__)
 
@@ -62,14 +64,22 @@ def default_orchestrator() -> HermesDomainOrchestrator:
 
 def build_agent(
     concept: Concept = UNBOUND_CONCEPT,
+    context: LearnerContext | None = None,
     *,
     orchestrator: HermesDomainOrchestrator | None = None,
     settings: Settings | None = None,
+    now: datetime | None = None,
 ) -> LlmAgent:
-    """The agent for one concept: its pedagogy's instruction, its tools."""
+    """The agent for one concept: its pedagogy, its content, its history, its
+    tools.
+
+    `context` is what makes RF2.7 real — and it is composed here, once, so the
+    learner's record cannot shift under a conversation already in progress.
+    Omitting it yields an agent that knows the concept but has no history,
+    which is what `root_agent` and the tool-calling probe want."""
     settings = settings or Settings.from_env()
     orchestrator = orchestrator or default_orchestrator()
-    instruction, tool_predicate = orchestrator.for_concept(concept)
+    instruction, tool_predicate = orchestrator.for_concept(concept, context, now)
 
     if settings.model_is_known_bad_at_tool_calling:
         # Loud rather than fatal: configuring it is the operator's call, but

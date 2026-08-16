@@ -9,6 +9,7 @@ tutor that works and misbehaves.
 from __future__ import annotations
 
 import textwrap
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,8 @@ from tutor.application.harness import (
 )
 from tutor.application.invariants import INVARIANTS
 from tutor.application.ports.outbound.vault import Concept
+from tutor.domain.learner_context import LearnerContext
+from tutor.domain.scheduling import Rating
 
 SOUL = "You are a tutor. SOUL-MARKER."
 
@@ -221,9 +224,10 @@ def test_for_concept_returns_an_instruction_callable(harness):
     """`LlmAgent.instruction` accepts `Callable[[ReadonlyContext], str]`, and
     composing once here is what freezes the volatile tier at session start
     (RF2.7) — mastery cannot change mid-dialogue."""
-    provider, _ = harness.for_concept(_concept(None))
+    concept = _concept(None)
+    provider, _ = harness.for_concept(concept)
 
-    assert provider(None) == harness.compose(harness.pedagogy_for(_concept(None)))
+    assert provider(None) == harness.compose(harness.pedagogy_for(concept), concept)
     assert provider(None) == provider(None)
 
 
@@ -307,3 +311,99 @@ def test_every_shipped_pedagogy_declares_only_real_tools():
     for pedagogy in harness._pedagogies.values():
         assert pedagogy.allowed_tools <= VAULT_TOOLS
         assert pedagogy.allowed_tools, f"{pedagogy.name} admits no tools at all"
+
+
+# --- the volatile tier (RF2.7, Task 6.1) ---------------------------------
+
+
+def _context(**kwargs) -> LearnerContext:
+    return LearnerContext(**kwargs)
+
+
+def test_the_concept_content_reaches_the_prompt(harness):
+    """It never used to: `for_concept` used the concept only to *select* a
+    pedagogy. Injecting it removes a required `get_concept` call from the
+    critical path, on models measured at 0/6 tool calls once the prompt
+    mentions tools (#12)."""
+    concept = Concept(
+        concept_id="concepts/attention",
+        title="Attention",
+        body="Attention weights every token against every other.",
+    )
+
+    composed = harness.compose(harness.pedagogy_for(concept), concept)
+
+    assert "Attention weights every token against every other." in composed
+    assert "concepts/attention" in composed
+
+
+def test_the_invariants_are_still_last_with_a_volatile_tier(harness):
+    """The whole of RF2.3. Adding a fourth layer is exactly the change that
+    could have broken it, which is why this is asserted on the composition that
+    has one."""
+    concept = Concept(concept_id="c", title="C", body="body")
+
+    composed = harness.compose(
+        harness.pedagogy_for(concept), concept, _context(times_seen=3)
+    )
+
+    assert composed.endswith(INVARIANTS)
+
+
+def test_the_record_is_composed_before_the_invariants_that_govern_it(harness):
+    """Order, not just presence. A record of confident reviews is precisely the
+    context that makes a model want to announce mastery — so the invariant
+    forbidding that has to come after it."""
+    concept = Concept(concept_id="c", body="body")
+    composed = harness.compose(
+        harness.pedagogy_for(concept), concept, _context(times_seen=6)
+    )
+
+    assert composed.index("What has happened") < composed.index(INVARIANTS)
+
+
+def test_no_scheduler_number_reaches_a_composed_prompt(harness):
+    """The prohibition holds at the level anything actually reaches a model,
+    not only in the module that renders the tier."""
+    concept = Concept(concept_id="c", body="body")
+    composed = harness.compose(
+        harness.pedagogy_for(concept),
+        concept,
+        LearnerContext(
+            times_seen=4,
+            last_reviewed_at=datetime(2026, 3, 1, tzinfo=UTC),
+            last_rating=Rating.HARD,
+        ),
+        now=datetime(2026, 8, 16, tzinfo=UTC),
+    ).lower()
+
+    for forbidden in ("stability", "difficulty", "retrievability"):
+        assert forbidden not in composed
+
+
+def test_the_tier_is_frozen_at_composition_time(harness):
+    """RF2.7. The provider closes over an already-composed string, so a record
+    that changes mid-session cannot shift the conversation under the learner —
+    fresh evidence reaches the model through the transcript instead (#39)."""
+    concept = Concept(concept_id="c", body="body")
+    instruction, _ = harness.for_concept(concept, _context(times_seen=1))
+
+    assert instruction(None) == instruction(None)
+
+
+def test_no_context_yields_a_usable_prompt_with_no_history(harness):
+    """`root_agent` and the tool-calling probe have no store. No history is
+    honest; a fabricated one would not be."""
+    composed = harness.compose(harness.pedagogy_for(_concept(None)), None, None)
+
+    assert "SOUL-MARKER" in composed
+    assert composed.endswith(INVARIANTS)
+    assert "What has happened" not in composed
+
+
+def test_an_unbound_concept_contributes_no_concept_block(harness):
+    """`Concept(concept_id="")` is "no goal chosen yet", not a concept with an
+    empty body — it must not render a heading with nothing under it."""
+    composed = harness.compose(harness.pedagogy_for(_concept(None)), Concept(concept_id=""))
+
+    assert "The concept you are teaching" not in composed

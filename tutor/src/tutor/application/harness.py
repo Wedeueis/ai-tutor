@@ -4,21 +4,30 @@ A **composition root, not a service holding prompt strings** (PRD v3 §5): the
 prose lives in `SOUL.md` and in each pedagogy's `SKILL.md`, so adding a way of
 teaching is dropping a directory rather than editing this file.
 
-Three layers, in this order (RF2.3):
+Four layers, in this order (RF2.3):
 
 1. `SOUL.md` — who the tutor is, the same in every session.
 2. The pedagogy overlay — how to teach *this* subject.
-3. The invariants — composed **last**, and unable to be overridden.
+3. The volatile tier — this concept, and what has happened with it (RF2.7).
+4. The invariants — composed **last**, and unable to be overridden.
 
 The order is the enforcement. A pedagogy is a markdown file that anyone can
 edit; if it could come after the invariants, every guarantee in §2.1 would be
-advisory.
+advisory. The volatile tier sits third for the same reason from the other
+direction — it is the layer most likely to *tempt* a violation, since a record
+of six confident reviews is exactly what makes a model want to tell someone
+they have mastered something.
+
+Layer 3 was empty until Task 6.1: `for_concept` used the concept only to select
+a pedagogy, so "the volatile tier is frozen at session start" was vacuously
+true. It is now the thing that gets frozen.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +35,7 @@ from google.adk.skills import Skill, load_skill_from_dir
 
 from tutor.application.invariants import INVARIANTS
 from tutor.application.ports.outbound.vault import Concept
+from tutor.domain.learner_context import LearnerContext
 
 logger = logging.getLogger(__name__)
 
@@ -141,16 +151,24 @@ class HermesDomainOrchestrator:
         return self._pedagogies[GENERIC_PEDAGOGY]
 
     def for_concept(
-        self, concept: Concept
+        self,
+        concept: Concept,
+        context: LearnerContext | None = None,
+        now: datetime | None = None,
     ) -> tuple[Callable[[Any], str], Callable[..., bool]]:
         """The `(InstructionProvider, ToolPredicate)` pair for this concept.
 
         The instruction is a callable because that is what
         `LlmAgent.instruction` accepts, and because RF2.7 freezes the volatile
-        tier at session start: composing here, once, is what stops mastery
-        changing mid-dialogue."""
+        tier at session start: composing here, **once**, is what stops the
+        learner's record shifting under a conversation already in progress.
+
+        `context` is optional so a caller with no store — a probe, `adk web`
+        importing `root_agent` — still gets a usable agent. It gets the concept
+        and the pedagogy, and simply no history, which is honest rather than
+        degraded."""
         pedagogy = self.pedagogy_for(concept)
-        instruction = self.compose(pedagogy)
+        instruction = self.compose(pedagogy, concept, context, now)
         allowed = pedagogy.allowed_tools
 
         def instruction_provider(_context: Any = None) -> str:
@@ -161,9 +179,51 @@ class HermesDomainOrchestrator:
 
         return instruction_provider, tool_predicate
 
-    def compose(self, pedagogy: Pedagogy) -> str:
-        """Soul, then pedagogy, then invariants — in that order, always."""
-        return "\n\n".join([self._soul, pedagogy.instructions.strip(), INVARIANTS])
+    def compose(
+        self,
+        pedagogy: Pedagogy,
+        concept: Concept | None = None,
+        context: LearnerContext | None = None,
+        now: datetime | None = None,
+    ) -> str:
+        """Soul, pedagogy, the volatile tier, then invariants — **invariants
+        always last** (RF2.3).
+
+        The volatile tier sits between the pedagogy and the invariants rather
+        than at the end, and the position is the point: it is the layer most
+        likely to say something a guardrail needs to override. A record showing
+        six confident reviews is exactly the context that makes a model want to
+        tell the learner they have mastered something, and the invariant
+        forbidding that has to come after it."""
+        layers = [self._soul, pedagogy.instructions.strip()]
+        if concept is not None and concept.concept_id:
+            layers.append(render_concept(concept))
+        if context is not None:
+            layers.append(context.render(now or datetime.now(UTC)))
+        layers.append(INVARIANTS)
+        return "\n\n".join(layers)
+
+
+def render_concept(concept: Concept) -> str:
+    """The concept as the tutor is given it, rather than as a tool call.
+
+    We already hold it — `ConductReview.ask` fetched it to write the question —
+    and injecting it removes a required `get_concept` round-trip from the
+    critical path of every teaching turn. On models measured at 0/6 tool calls
+    once the prompt mentions tools (#12), a call the agent does not have to make
+    is a call that cannot fail. The read-only tools remain, for following the
+    thread outward."""
+    lines = [
+        "# The concept you are teaching",
+        "",
+        f"id: {concept.concept_id}",
+    ]
+    if concept.title:
+        lines.append(f"title: {concept.title}")
+    if concept.description:
+        lines.append(f"description: {concept.description}")
+    lines += ["", concept.body.strip()]
+    return "\n".join(lines).rstrip()
 
 
 def _load_pedagogies(pedagogies_dir: Path) -> dict[str, Pedagogy]:

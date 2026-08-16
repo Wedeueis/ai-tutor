@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from tutor.domain.depth import DepthLevel
-from tutor.domain.review import ReviewEvent
+from tutor.domain.review import ReviewEvent, ReviewSummary
 from tutor.domain.scheduling import SchedulerState
 
 
@@ -31,6 +31,20 @@ class LearnerStorePort(Protocol):
         a stale checkpoint after a parameter re-fit silently corrupts
         scheduling, so the identity is compared before use rather than
         maintained by remembering to clear a table (PRD v3 §7)."""
+        ...
+
+    def review_summary(self, concept_id: str) -> ReviewSummary:
+        """The concept's history as the *prompt* is allowed to see it (RF2.7).
+
+        Deliberately not `scheduler_state`, even though both are projections
+        over the same log. That one carries stability and difficulty, which must
+        never reach a model (#39); this one carries how often, how recently and
+        how it went. Two types rather than one is what stops a scheduler field
+        arriving in a prompt because it happened to be on an object already in
+        scope.
+
+        Never raises: a concept nobody has reviewed has an empty summary, not
+        an error."""
         ...
 
     def has_discursive_evidence(self, concept_id: str) -> bool:
