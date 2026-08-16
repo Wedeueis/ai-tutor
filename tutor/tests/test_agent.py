@@ -40,6 +40,8 @@ def settings(tmp_path) -> Settings:
         pipeline_mcp_url="http://127.0.0.1:8000/mcp",
         learner_db_path=tmp_path / "learner.db",
         session_db_url=f"sqlite:///{tmp_path / 'sessions.db'}",
+        inquiries_dir=tmp_path / "inquiries",
+        proposals_dir=tmp_path / "proposals",
     )
 
 

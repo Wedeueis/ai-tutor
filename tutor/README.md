@@ -28,7 +28,13 @@ live in the vault, no means it never leaves here.
 
 `tutor` never writes the OKF bundle. `pipeline` remains the only thing that
 creates a concept; approving a proposal means moving the file into
-`vault/raw/`.
+`vault/raw/` — see `proposals/README.md`.
+
+The enforcement is `ContributionPort`, which has exactly two verbs and no type
+for a blindspot. A guard that inspected content and decided could be wrong; a
+verb that does not exist cannot be called. Everything it writes is named
+`<date>-tutor-<kind>-<slug>.md`, so tutor-origin material is obvious in an
+inbox otherwise full of things you dropped there yourself.
 
 ## Layout
 

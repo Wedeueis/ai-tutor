@@ -12,6 +12,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 _TUTOR_ROOT = Path(__file__).resolve().parents[2]
+_VAULT_ROOT = _TUTOR_ROOT.parent / "vault"
+"""The sibling checkout's vault. A path, never an import: `tutor` reads the
+vault's *content* only over MCP (rule 1). The one thing it touches on disk is
+the inbox, which is not the bundle."""
 
 DEFAULT_CHAT_MODEL = "qwen3.5:4b"
 """**Not `llama3.1:8b`** — NFR2. Measured in #12: 0/6 real tool calls once the
@@ -44,6 +48,8 @@ class Settings:
     pipeline_mcp_url: str
     learner_db_path: Path
     session_db_url: str
+    inquiries_dir: Path
+    proposals_dir: Path
 
     @property
     def litellm_model(self) -> str:
@@ -84,5 +90,18 @@ class Settings:
             ),
             session_db_url=os.environ.get(
                 "TUTOR_SESSION_DB_URL", f"sqlite:///{data_dir / 'sessions.db'}"
+            ),
+            # The two directories `tutor` may write to, and the only ones.
+            # `vault/raw/` is a capture surface, explicitly not part of the OKF
+            # bundle — `tutor` never writes the bundle itself (#8).
+            inquiries_dir=Path(
+                os.environ.get(
+                    "TUTOR_INQUIRIES_DIR", str(_VAULT_ROOT / "raw" / "inquiries")
+                )
+            ),
+            # Not in the vault at all: a proposal is waiting for a human, and
+            # approving it means moving the file into `vault/raw/`.
+            proposals_dir=Path(
+                os.environ.get("TUTOR_PROPOSALS_DIR", str(_TUTOR_ROOT / "proposals"))
             ),
         )
