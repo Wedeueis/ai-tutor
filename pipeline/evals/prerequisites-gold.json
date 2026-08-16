@@ -1,152 +1,152 @@
 [
   {
-    "source": "self-attention",
-    "target": "attention-is-all-you-need",
-    "is_prerequisite": true
-  },
-  {
-    "source": "self-attention",
-    "target": "local-attention-mechanisms",
-    "is_prerequisite": true
-  },
-  {
-    "source": "relu-activation",
-    "target": "position-wise-feed-forward-networks",
-    "is_prerequisite": true
-  },
-  {
-    "source": "dependency-parsing",
-    "target": "dependencyextractor",
-    "is_prerequisite": true
-  },
-  {
-    "source": "dependency-parsing",
-    "target": "dependency-based-knowledge-graph-construction",
-    "is_prerequisite": true
-  },
-  {
-    "source": "cold-brew-coffee",
-    "target": "cold-brew-concentrate-ratio",
-    "is_prerequisite": true
-  },
-  {
-    "source": "qubits",
-    "target": "quantum-computers",
-    "is_prerequisite": true
-  },
-  {
     "source": "attention-is-all-you-need",
-    "target": "transformer-variations",
-    "is_prerequisite": true
-  },
-  {
-    "source": "retrieval-augmented-generation-rag",
-    "target": "scalable-graphrag-construction",
-    "is_prerequisite": true
-  },
-  {
-    "source": "retrieval-augmented-generation-rag",
-    "target": "graphrag-system-improvements",
-    "is_prerequisite": true
-  },
-  {
-    "source": "model-evaluation-metrics",
-    "target": "llm-as-a-judge-framework",
-    "is_prerequisite": true
-  },
-  {
-    "source": "dot-product-properties",
     "target": "self-attention",
     "is_prerequisite": true
   },
   {
-    "source": "retrieval-augmented-generation-rag",
-    "target": "lightweight-hybrid-subgraph-retrieval",
+    "source": "local-attention-mechanisms",
+    "target": "self-attention",
     "is_prerequisite": true
   },
   {
-    "source": "model-evaluation-metrics",
-    "target": "bleu-score",
+    "source": "position-wise-feed-forward-networks",
+    "target": "relu-activation",
     "is_prerequisite": true
-  },
-  {
-    "source": "training-regime",
-    "target": "hyperparameter-tuning",
-    "is_prerequisite": true
-  },
-  {
-    "source": "adam-optimizer",
-    "target": "attention-is-all-you-need",
-    "is_prerequisite": false
-  },
-  {
-    "source": "gated-recurrent-units",
-    "target": "long-short-term-memory-lstm",
-    "is_prerequisite": false
-  },
-  {
-    "source": "bleu-score",
-    "target": "llm-as-a-judge-framework",
-    "is_prerequisite": false
-  },
-  {
-    "source": "beam-search",
-    "target": "hybrid-search",
-    "is_prerequisite": false
-  },
-  {
-    "source": "cold-brew-coffee",
-    "target": "ideal-espresso-ratio",
-    "is_prerequisite": false
-  },
-  {
-    "source": "wmt-dataset",
-    "target": "bleu-score",
-    "is_prerequisite": false
-  },
-  {
-    "source": "rag-does-not-work-for-enterprises",
-    "target": "retrieval-augmented-generation-rag",
-    "is_prerequisite": false
-  },
-  {
-    "source": "scalable-graphrag-construction",
-    "target": "retrieval-augmented-generation-rag",
-    "is_prerequisite": false
   },
   {
     "source": "dependencyextractor",
     "target": "dependency-parsing",
-    "is_prerequisite": false
+    "is_prerequisite": true
+  },
+  {
+    "source": "dependency-based-knowledge-graph-construction",
+    "target": "dependency-parsing",
+    "is_prerequisite": true
+  },
+  {
+    "source": "cold-brew-concentrate-ratio",
+    "target": "cold-brew-coffee",
+    "is_prerequisite": true
   },
   {
     "source": "quantum-computers",
+    "target": "qubits",
+    "is_prerequisite": true
+  },
+  {
+    "source": "transformer-variations",
     "target": "attention-is-all-you-need",
+    "is_prerequisite": true
+  },
+  {
+    "source": "scalable-graphrag-construction",
+    "target": "retrieval-augmented-generation-rag",
+    "is_prerequisite": true
+  },
+  {
+    "source": "graphrag-system-improvements",
+    "target": "retrieval-augmented-generation-rag",
+    "is_prerequisite": true
+  },
+  {
+    "source": "llm-as-a-judge-framework",
+    "target": "model-evaluation-metrics",
+    "is_prerequisite": true
+  },
+  {
+    "source": "self-attention",
+    "target": "dot-product-properties",
+    "is_prerequisite": true
+  },
+  {
+    "source": "lightweight-hybrid-subgraph-retrieval",
+    "target": "retrieval-augmented-generation-rag",
+    "is_prerequisite": true
+  },
+  {
+    "source": "bleu-score",
+    "target": "model-evaluation-metrics",
+    "is_prerequisite": true
+  },
+  {
+    "source": "hyperparameter-tuning",
+    "target": "training-regime",
+    "is_prerequisite": true
+  },
+  {
+    "source": "attention-is-all-you-need",
+    "target": "adam-optimizer",
     "is_prerequisite": false
   },
   {
-    "source": "aligraph-a-comprehensive-graph-neural-network-platform",
-    "target": "cluster-gcn",
+    "source": "long-short-term-memory-lstm",
+    "target": "gated-recurrent-units",
     "is_prerequisite": false
   },
   {
-    "source": "entityrelationnormalizer",
-    "target": "contentfilter",
+    "source": "llm-as-a-judge-framework",
+    "target": "bleu-score",
     "is_prerequisite": false
   },
   {
-    "source": "label-smoothing",
-    "target": "exponential-learning-rate-decay",
+    "source": "hybrid-search",
+    "target": "beam-search",
     "is_prerequisite": false
   },
   {
-    "source": "hallucinations-in-dense-vector-retrieval",
-    "target": "hybrid-search",
+    "source": "ideal-espresso-ratio",
+    "target": "cold-brew-coffee",
     "is_prerequisite": false
   },
   {
-    "source": "byte-pair-encoding",
-    "target": "position-wise-feed-forward-networks",
+    "source": "bleu-score",
+    "target": "wmt-dataset",
+    "is_prerequisite": false
+  },
+  {
+    "source": "retrieval-augmented-generation-rag",
+    "target": "rag-does-not-work-for-enterprises",
+    "is_prerequisite": false
+  },
+  {
+    "source": "retrieval-augmented-generation-rag",
+    "target": "scalable-graphrag-construction",
+    "is_prerequisite": false
+  },
+  {
+    "source": "dependency-parsing",
+    "target": "dependencyextractor",
+    "is_prerequisite": false
+  },
+  {
+    "source": "attention-is-all-you-need",
+    "target": "quantum-computers",
+    "is_prerequisite": false
+  },
+  {
+    "source": "cluster-gcn",
+    "target": "aligraph-a-comprehensive-graph-neural-network-platform",
+    "is_prerequisite": false
+  },
+  {
+    "source": "contentfilter",
+    "target": "entityrelationnormalizer",
+    "is_prerequisite": false
+  },
+  {
+    "source": "exponential-learning-rate-decay",
+    "target": "label-smoothing",
+    "is_prerequisite": false
+  },
+  {
+    "source": "hybrid-search",
+    "target": "hallucinations-in-dense-vector-retrieval",
+    "is_prerequisite": false
+  },
+  {
+    "source": "position-wise-feed-forward-networks",
+    "target": "byte-pair-encoding",
     "is_prerequisite": false
   }
 ]

@@ -184,3 +184,52 @@ def test_missing_rubrics_are_an_error_not_a_silent_zero(tmp_path):
 
     with pytest.raises(ValueError, match="no 'prerequisites' rubrics"):
         use_case.run()
+
+
+# --- direction (ADR 0002) ------------------------------------------------
+
+
+def test_the_gold_set_reads_source_requires_target(tmp_path):
+    """ADR 0002. The convention is one word wide and reverses cleanly, and a
+    transposed gold set already cost a full measurement cycle: it read 0.517
+    on a weak model (looking like a tuning problem) and 0.000 on a capable one,
+    where the corrected set reads 1.000."""
+    use_case = _build(
+        tmp_path,
+        pairs=[
+            {
+                "source": "multi-head-attention",
+                "target": "scaled-dot-product-attention",
+                "is_prerequisite": True,
+            }
+        ],
+        # The skill is keyed by *target*: this canned score is returned only if
+        # the dependent was offered as the source and its prerequisite as the
+        # candidate. Transposing the convention would score the other id.
+        assessments_by_target={
+            "scaled-dot-product-attention": [RubricScore("blocks", 0.9, "required")]
+        },
+    )
+
+    report = use_case.run()
+
+    assert report.outcomes[0].tier is PrerequisiteTier.REQUIRES
+    assert report.precision == 1.0
+
+
+def test_the_real_gold_set_states_the_dependent_first():
+    """Guards the shipped file itself, not just the machinery. Checks a pair
+    whose direction is unambiguous: a paper's contribution cannot be a
+    prerequisite of the mechanism it introduced."""
+    import json
+    from pathlib import Path
+
+    evals_dir = Path(__file__).resolve().parents[2] / "evals"
+    pairs = json.loads((evals_dir / "prerequisites-gold.json").read_text())
+    by_pair = {(p["source"], p["target"]): p["is_prerequisite"] for p in pairs}
+
+    assert by_pair[("attention-is-all-you-need", "self-attention")] is True
+    assert by_pair[("dependencyextractor", "dependency-parsing")] is True
+    # The reverse of a true pair must be present as a hard negative — without
+    # reversed pairs a transposition is undetectable (ADR 0002).
+    assert by_pair[("dependency-parsing", "dependencyextractor")] is False

@@ -16,15 +16,16 @@ one that doesn't is `may_require::`. This module is pure — the judging
 happens behind `PrerequisiteSkillPort`, the graph lookups behind
 `MetadataRepositoryPort`.
 
-**Known weakness, for whoever calibrates this against the gold set (RF1.3).**
-`aggregate_scores` is a flat mean, which is the wrong shape for a
-precision-first gate: `blocks_comprehension` is a *necessary* condition and the
-other four are supporting evidence, but the mean lets four supporting 1.0s
-outvote a decisive 0.0. Measured on `llama3.1:8b`, a plainly-sibling pair
-(cold brew / pour-over) scored `blocks_comprehension` 0.0 and still averaged
-0.70 into the `requires::` tier. The fix is a weighting or a veto rather than a
-mean — but the threshold for one can't be picked honestly without the labelled
-pairs, so the rollup stays as RF1.2 specifies until then."""
+**On the rollup, and a superseded suspicion.** An earlier note here argued the
+flat mean was the wrong shape for a precision-first gate, because a
+plainly-sibling pair scored `blocks_comprehension` 0.0 and still averaged 0.70
+into `requires::` on `llama3.1:8b`. Measuring against the gold set disproved
+it: that model scored 0.517 precision by saying yes to nearly everything, and
+its per-rubric means separated true from false pairs by 0.007 — the mean was
+not outvoting a good signal, there was no signal to outvote. With a model that
+can make the judgement, the same rubrics and the same flat mean score **1.000
+precision** on the same 30 pairs. The rollup is fine; it was never the
+constraint (issues #24, #19)."""
 
 from __future__ import annotations
 
