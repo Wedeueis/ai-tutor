@@ -83,6 +83,7 @@ def _chat_client(settings: Settings, ollama: OllamaClient) -> ChatModelPort:
             max_tokens=settings.openrouter_max_tokens,
             max_retries=settings.ollama_max_retries,
             retry_backoff_seconds=settings.ollama_retry_backoff_seconds,
+            reasoning=settings.openrouter_reasoning,
         )
     return ollama
 

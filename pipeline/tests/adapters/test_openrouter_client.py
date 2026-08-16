@@ -110,13 +110,14 @@ def test_a_reply_with_no_choices_is_reported_clearly(monkeypatch):
         client.generate("some/model", "p")
 
 
-def test_empty_content_names_the_likely_cause(monkeypatch):
-    """A reasoning model can spend its whole budget on hidden reasoning and
-    return nothing — the failure `qwen3.5:4b` shows locally. "No JSON found"
-    would send the reader looking in the wrong place."""
+def test_empty_content_names_the_likely_cause_and_the_first_fix(monkeypatch):
+    """A model can spend its whole budget thinking and return nothing — the
+    failure `qwen3.5:4b` shows locally. "No JSON found" would send the reader
+    looking in the wrong place, so the message names both the cause and the
+    setting to check."""
     client = _client(monkeypatch, _reply(""))
 
-    with pytest.raises(OpenRouterError, match="max_tokens on reasoning"):
+    with pytest.raises(OpenRouterError, match="OPENROUTER_REASONING"):
         client.generate("some/model", "p")
 
 
@@ -155,3 +156,37 @@ def test_a_5xx_is_retried_then_gives_up(monkeypatch):
     with pytest.raises(OpenRouterError, match="after 3 attempt"):
         client.generate("some/model", "p")
     assert calls["n"] == 3
+
+
+# --- reasoning is off by default -----------------------------------------
+
+
+def test_reasoning_is_disabled_by_default(monkeypatch):
+    """Skill prompts ask for scored JSON whose own `rationale` fields are the
+    only reasoning anything downstream reads, so chain-of-thought tokens are
+    billed and then discarded. Worse, a model that spends its budget thinking
+    returns empty content — how `deepseek-v4-flash` failed 14 of 30 gold-set
+    pairs. Measured 4.3x cheaper with it off."""
+    captured: dict = {}
+    client = _client(monkeypatch, _reply("hi"), captured=captured)
+
+    client.generate("deepseek/deepseek-v4-flash-0731", "hello")
+
+    assert captured["json"]["reasoning"] == {"enabled": False}
+
+
+def test_reasoning_can_be_turned_back_on(monkeypatch):
+    """`OPENROUTER_REASONING=true`, for a task that genuinely needs it — the
+    parameter is then omitted entirely so the model's own default applies."""
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        captured.update({"json": json})
+        return httpx.Response(200, json=_reply("hi"), request=httpx.Request("POST", url))
+
+    captured: dict = {}
+    monkeypatch.setattr(httpx, "post", fake_post)
+    client = OpenRouterClient(api_key="sk-test", reasoning=True, max_retries=0)
+
+    client.generate("some/model", "hello")
+
+    assert "reasoning" not in captured["json"]

@@ -45,6 +45,7 @@ class OpenRouterClient:
         max_tokens: int = 2048,
         max_retries: int = 3,
         retry_backoff_seconds: float = 1.0,
+        reasoning: bool = False,
         app_title: str = "okf-pipeline",
     ) -> None:
         if not api_key:
@@ -59,6 +60,7 @@ class OpenRouterClient:
         self._max_tokens = max_tokens
         self._max_retries = max_retries
         self._retry_backoff_seconds = retry_backoff_seconds
+        self._reasoning = reasoning
         self._app_title = app_title
 
     def generate(self, model: str, prompt: str) -> str:
@@ -73,6 +75,7 @@ class OpenRouterClient:
                 # rollups are thresholded, so sampling noise is pure downside
                 # here: the same draft should get the same verdict twice.
                 "temperature": 0.0,
+                **self._reasoning_parameter(),
             },
             provider="OpenRouter",
             error_cls=OpenRouterError,
@@ -88,6 +91,27 @@ class OpenRouterClient:
             },
         )
         return _content(response.json())
+
+    def _reasoning_parameter(self) -> dict[str, Any]:
+        """Reasoning is **off by default**, which is both the cheaper and the
+        more reliable setting for this workload.
+
+        Every skill prompt asks for a scored JSON structure, and the rationale
+        the model writes into that JSON is the only reasoning anything
+        downstream reads — chain-of-thought tokens are billed and then
+        discarded. Worse, a reasoning model can spend its entire completion
+        budget thinking and return *empty content*, which is how
+        `deepseek-v4-flash-0731` failed on 14 of 30 gold-set pairs.
+
+        Measured on one of those failing pairs: reasoning off returned full
+        content at **4.3x lower cost** than the default (6.3e-05 vs 2.7e-04),
+        with 0 reasoning tokens instead of ~110.
+
+        Set `OPENROUTER_REASONING=true` to re-enable it for a task that
+        genuinely needs it."""
+        if self._reasoning:
+            return {}
+        return {"reasoning": {"enabled": False}}
 
     def generate_json(self, model: str, prompt: str) -> dict[str, Any] | list[Any]:
         return self._as_json(extract_json, model, prompt)
@@ -118,11 +142,12 @@ def _content(payload: dict[str, Any]) -> str:
 
     content = choices[0].get("message", {}).get("content")
     if not content:
-        # A reasoning model can spend its entire budget on hidden reasoning and
-        # return empty content — the same failure `qwen3.5:4b` shows locally.
-        # Say so, rather than letting it surface as "no JSON found".
+        # A reasoning model can spend its entire budget thinking and return
+        # empty content — the same failure `qwen3.5:4b` shows locally. Name the
+        # cause, rather than letting it surface as "no JSON found".
         raise OpenRouterError(
             "OpenRouter returned empty content — the model may have exhausted "
-            "max_tokens on reasoning before answering"
+            "max_tokens before answering. Reasoning is disabled by default; if "
+            "OPENROUTER_REASONING=true, that is the first thing to turn back off."
         )
     return str(content)

@@ -85,3 +85,20 @@ def test_the_embedding_model_is_unaffected_by_the_provider(monkeypatch):
     monkeypatch.setenv("CHAT_PROVIDER", "openrouter")
 
     assert Settings.from_env().ollama_embed_model == "nomic-embed-text"
+
+
+def test_the_default_openrouter_model_is_not_a_premium_one():
+    """Cost is a first-class constraint here: a personal vault, and a full
+    prerequisite backfill is hundreds of calls. A cheap model underperforming
+    is a reason to fix the harness before it is a reason to spend more."""
+    from pipeline.config import DEFAULT_OPENROUTER_CHAT_MODEL
+
+    assert DEFAULT_OPENROUTER_CHAT_MODEL.startswith("deepseek/")
+
+
+def test_reasoning_is_off_unless_asked_for(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_REASONING", raising=False)
+    assert Settings.from_env().openrouter_reasoning is False
+
+    monkeypatch.setenv("OPENROUTER_REASONING", "true")
+    assert Settings.from_env().openrouter_reasoning is True

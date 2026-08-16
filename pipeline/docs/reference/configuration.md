@@ -17,8 +17,9 @@ shell, a container, or a CI secret.
 | `VAULT_PATH` | `../vault` (resolved relative to the `pipeline/` package, i.e. the sibling `vault/` directory at the repo root) | Root of the OKF bundle this pipeline reads and writes. |
 | `CHAT_PROVIDER` | `ollama` | Which service runs the LLM-backed text skills: `ollama` (local) or `openrouter` (cloud). See [Choosing a chat provider](#choosing-a-chat-provider) — this is the one setting that decides whether vault content leaves the machine. An unrecognised value raises rather than falling back to local. |
 | `OPENROUTER_API_KEY` | *(unset)* | Required when `CHAT_PROVIDER=openrouter`; the client refuses to construct without it, rather than failing on the first skill call mid-batch. Put it in `.env` (git-ignored), never in `.env.example`. |
-| `OPENROUTER_CHAT_MODEL` | `anthropic/claude-sonnet-4.5` | OpenRouter model **slug**, not the display name — `deepseek/deepseek-v4-flash-0731`, not `DeepSeek V4 Flash 0731`. A wrong one returns a 400 whose body names the problem. |
+| `OPENROUTER_CHAT_MODEL` | `deepseek/deepseek-v4-flash-0731` | OpenRouter model **slug**, not the display name — `deepseek/deepseek-v4-flash-0731`, not `DeepSeek V4 Flash 0731`. A wrong one returns a 400 whose body names the problem. Cost is a first-class constraint: the default stays a cheap model, and an underperforming one is a reason to fix the harness before spending more. |
 | `OPENROUTER_RELATEDNESS_MODEL` | same as `OPENROUTER_CHAT_MODEL` | The OpenRouter counterpart of `OLLAMA_RELATEDNESS_MODEL`, for the same reason: relatedness runs on every draft, so a cheaper model is often right. |
+| `OPENROUTER_REASONING` | `false` | Whether to let the model think before answering. **Off is both cheaper and more reliable here**: skill prompts ask for scored JSON whose own `rationale` fields are the only reasoning anything downstream reads, so chain-of-thought tokens are billed and discarded — and a model that spends its budget thinking returns *empty content*. Measured 4.3x cheaper with it off, on a pair that failed with it on. |
 | `OPENROUTER_MAX_TOKENS` | `8192` | Completion budget. Deliberately **not** shared with `OLLAMA_MAX_PREDICT_TOKENS`: that caps a local model that might never emit EOS, whereas here the budget must also cover a reasoning model's hidden tokens. Set too low, the reply comes back *empty* rather than truncated — the client says so explicitly when it does. |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Override for a proxy or a compatible endpoint. |
 | `OLLAMA_HOST` | `http://localhost:11434` | Base URL for the local Ollama API. |
@@ -100,11 +101,29 @@ CHAT_PROVIDER=openrouter uv run pipeline eval-prerequisites --verbose
 
 Two failure modes worth recognising, both observed:
 
-- **Empty content.** A reasoning model can spend its whole completion budget
-  on hidden reasoning and return nothing. Raise `OPENROUTER_MAX_TOKENS`.
+- **Empty content.** A model can spend its whole completion budget thinking and
+  return nothing. Check `OPENROUTER_REASONING` is off first; raise
+  `OPENROUTER_MAX_TOKENS` second.
 - **A model that says yes to everything.** Watch `emitted as requires` against
   `pairs`: a gate emitting an edge for nearly every pair has stopped
   discriminating, whatever its precision happens to be.
+
+### When a cheap model underperforms
+
+Fix the harness before reaching for a pricier one — cost is a standing
+constraint on this project, not an afterthought. In order of what has actually
+worked here:
+
+1. **Turn reasoning off** (`OPENROUTER_REASONING=false`, the default). It
+   eliminated the empty-content failures *and* cut cost 4.3x.
+2. **Raise `OPENROUTER_MAX_TOKENS`** if replies are still truncated.
+3. **Tolerate what the model gets slightly wrong.** `extract_json` already
+   closes an unterminated array, because `deepseek-v4-flash` emits five valid
+   objects and omits the final `]`.
+4. **Check the labels before blaming the model.** A near-zero precision from a
+   capable model usually means it is answering a different question than the
+   one being scored — see
+   [ADR 0002](../../../docs/adr/0002-prerequisite-edges-are-written-on-the-dependent-concept.md).
 
 ## Logging
 

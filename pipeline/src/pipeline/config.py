@@ -57,8 +57,14 @@ class ChatProvider(str, Enum):
     OLLAMA = "ollama"
     OPENROUTER = "openrouter"
 
-DEFAULT_OPENROUTER_CHAT_MODEL = "anthropic/claude-sonnet-4.5"
-"""No default is safe on judgement alone: tool-calling and rubric-scoring
+DEFAULT_OPENROUTER_CHAT_MODEL = "deepseek/deepseek-v4-flash-0731"
+"""Cost is a first-class constraint on this project — it is a personal vault,
+and a full prerequisite backfill is hundreds of calls. A premium model is not
+a default here, and a cheap model underperforming is a reason to fix the
+harness (reasoning off, bigger token budget, tolerant JSON parsing) before it
+is a reason to spend more.
+
+No default is safe on judgement alone, though: tool-calling and rubric-scoring
 reliability are per-model properties, verified by sampling, and a single
 passing run proves nothing (PRD v3 NFR3). Measure with
 `pipeline eval-prerequisites` before trusting whatever is set here."""
@@ -101,6 +107,7 @@ class Settings:
     openrouter_chat_model: str
     openrouter_relatedness_model: str
     openrouter_max_tokens: int
+    openrouter_reasoning: bool
     ollama_host: str
     ollama_chat_model: str
     ollama_relatedness_model: str
@@ -178,6 +185,11 @@ class Settings:
             # also has to cover a reasoning model's hidden tokens, and a
             # too-small one returns empty content rather than truncated JSON.
             openrouter_max_tokens=_int_env("OPENROUTER_MAX_TOKENS", 8192),
+            # Off by default: skill prompts ask for scored JSON whose own
+            # `rationale` fields are the only reasoning anything reads, so
+            # chain-of-thought tokens are billed and discarded — and a model
+            # that spends its budget thinking returns empty content.
+            openrouter_reasoning=_bool_env("OPENROUTER_REASONING", False),
             vault_path=Path(
                 os.environ.get("VAULT_PATH", str(_PIPELINE_ROOT.parent / "vault"))
             ).resolve(),

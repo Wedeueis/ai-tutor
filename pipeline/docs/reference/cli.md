@@ -285,13 +285,14 @@ quietly promotes an edge a human reviewed and left demoted.
 plan walks, and a wrong `requires::` edge sends the learner to study something
 they do not need with nothing downstream to catch it. `pipeline
 eval-prerequisites` reports precision against the labelled gold set; the bar
-is 0.9. Reaching it currently needs a cloud model (see
-[configuration](configuration.md#choosing-a-chat-provider)) — on `llama3.1:8b`
-the gate scored 0.517.
+is 0.9. On `llama3.1:8b` the gate scored 0.517, so this needs a cloud model —
+see [configuration](configuration.md#choosing-a-chat-provider), and the
+"when a cheap model underperforms" checklist there before considering a
+pricier one.
 
-That also makes a full pass several hundred metered calls, which is what
-`--dry-run` and `--limit` are for: `--dry-run -n 5` shows the edges it would
-write, with their rolled-up scores, without touching the vault.
+A full pass is still hundreds of metered calls, which is what `--dry-run` and
+`--limit` are for: `--dry-run -n 5` shows the edges it would write, with their
+rolled-up scores, without touching the vault.
 
 Two tiers are emitted. `requires::` is the only one any consumer reads;
 `may_require::` is recorded for human review and is deliberately inert.
