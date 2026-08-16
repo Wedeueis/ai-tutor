@@ -47,6 +47,7 @@ from pipeline.adapters.sqlite.sqlite_intake_repository import SqliteIntakeReposi
 from pipeline.adapters.sqlite.sqlite_metadata_repository import SqliteMetadataRepository
 from pipeline.application.ports.chat_model import ChatModelPort
 from pipeline.application.use_cases.audit_concept_quality import AuditConceptQuality
+from pipeline.application.use_cases.backfill_prerequisites import BackfillPrerequisites
 from pipeline.application.use_cases.categorize_concepts import CategorizeConcepts
 from pipeline.application.use_cases.category_materializer import CategoryMaterializer
 from pipeline.application.use_cases.evaluate_prerequisites import EvaluatePrerequisites
@@ -196,6 +197,17 @@ class Container:
         self.rebuild_index = RebuildIndex(self.concept_repository, self.index_concept)
         self.category_materializer = CategoryMaterializer(
             self.concept_repository, self.index_concept, self.bundle_log
+        )
+        self.backfill_prerequisites = BackfillPrerequisites(
+            concept_repository=self.concept_repository,
+            metadata_repository=self.metadata_repository,
+            embedding=self.embedding,
+            vector_search=self.vector_search,
+            prerequisite_judgement=self.prerequisite_judgement_skill,
+            eval_rubrics_repository=self.eval_rubrics_repository,
+            index_concept=self.index_concept,
+            threshold=settings.prerequisite_threshold,
+            candidate_k=settings.prerequisite_candidate_k,
         )
         self.evaluate_prerequisites = EvaluatePrerequisites(
             concept_repository=self.concept_repository,
@@ -620,3 +632,43 @@ def eval_prerequisites(
         typer.echo("")
         typer.echo("BELOW THE BAR - do not backfill (see `pipeline prerequisites`).")
         raise typer.Exit(code=1)
+
+
+@app.command()
+def prerequisites(
+    limit: int = typer.Option(
+        0, "--limit", "-n", help="Only process this many concepts (0 = all)."
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show the edges without writing them."
+    ),
+) -> None:
+    """Backfill `requires::` edges for concepts that predate the feature
+    (RF1.4) — skips anything already carrying an edge, and anything
+    structural. Idempotent: a second run changes nothing.
+
+    Run `pipeline eval-prerequisites` first. The gate writes into the graph
+    the study plan walks, and a model that has not cleared the 0.9 precision
+    bar will emit roughly one wrong edge for every right one.
+
+    On a cloud provider a full pass is hundreds of metered calls, so
+    `--dry-run -n 5` is the cheap way to see what it would do first.
+    """
+    container = _container()
+    outcomes = container.backfill_prerequisites.run(
+        limit=limit or None, dry_run=dry_run
+    )
+
+    for outcome in outcomes:
+        typer.echo(outcome.concept_id)
+        for edge in outcome.edges:
+            typer.echo(
+                f"    {edge.relation_type:<12} {edge.target_id}  "
+                f"({edge.eval.average_score:.2f})"
+            )
+
+    verb = "would emit" if dry_run else "emitted"
+    typer.echo("")
+    typer.echo(f"{verb} prerequisites for {len(outcomes)} concept(s)")
+    if dry_run:
+        typer.echo("dry run: nothing was written")
