@@ -62,8 +62,10 @@ dump rather than prose, which is skipped instead (counted in
 
 **Depends on:** `ExtractionSkillPort`, `EmbeddingPort`, `VectorSearchPort`,
 `EntityDisambiguationSkillPort`, `TypeClassificationSkillPort`,
-`DomainClassificationSkillPort`, `QualityEvalSkillPort`,
-`RelatednessSkillPort`, `EvalRubricsRepositoryPort`, `MetadataRepositoryPort`,
+`DomainClassificationSkillPort`, `CategoryClassificationSkillPort`,
+`QualityEvalSkillPort`, `RelatednessSkillPort`,
+`PrerequisiteJudgementSkillPort`, `RelevanceEvidencePort`,
+`EvalRubricsRepositoryPort`, `MetadataRepositoryPort`,
 `ConceptRepositoryPort`
 
 **`run(raw: RawItem) -> AgentResult`** — orchestrates every LLM-backed skill
@@ -77,9 +79,50 @@ it's pure decision logic; `IngestRawMaterial` applies the decisions. Full
 flow diagram:
 [Architecture → Data flow § `KnowledgeAgent.run(raw)`](../architecture/data-flow.md#4-knowledgeagentrunraw-the-judgment-pipeline).
 
-Constructor also takes two tunable thresholds:
-`disambiguation_confidence_threshold` (default `0.75`) and `eval_threshold`
-(default `0.7`, from `domain/eval.py::DEFAULT_EVAL_THRESHOLD`).
+On the create path it also judges **fit to the bundle**
+(`domain/relevance.py::judge_relevance`, RF1.6) and **prerequisites**
+(`domain/prerequisites.py::select_prerequisites`, RF1.1) — see the two
+sections below.
+
+Constructor also takes tunable thresholds:
+`disambiguation_confidence_threshold` (default `0.75`), `eval_threshold`
+(default `0.7`, from `domain/eval.py::DEFAULT_EVAL_THRESHOLD`),
+`relatedness_min_score`, `category_confidence_threshold`,
+`prerequisite_threshold` (default `0.7`) and `prerequisite_candidate_k`.
+
+### Relevance: does this draft belong here at all?
+
+Judged **only on the create path**, before the remaining skills. A merge folds
+into a concept that already earned its place, so similarity is the point there
+rather than a reason to reject; and a draft that doesn't belong shouldn't cost
+a type classification and five prerequisite calls.
+
+Relevance is **extrinsic** — the `evals/` rubrics judge a draft on its own, so
+a well-written note about the wrong subject passes every one of them. Two ways
+to fail: **redundant** (already covered — distinct from a merge, which
+disambiguation decides) and **off-topic**.
+
+Accepting is the default and every uncertainty resolves that way, because
+rejecting drops the draft and keeps only the rationale in `bundle_log`.
+Source credibility signals shift the topicality floor **downward only**:
+absent signals leave it exactly where it is, which
+[ADR 0001](../../../docs/adr/0001-capture-source-credibility-signals-never-store-a-score.md)
+requires — reading absent as low-credibility would reject the entire existing
+corpus. The score is never persisted.
+
+### Prerequisites: two tiers, precision first
+
+Emitted onto the **dependent** concept as a Dataview inline field
+(`requires:: [[/target]]`), per
+[ADR 0002](../../../docs/adr/0002-prerequisite-edges-are-written-on-the-dependent-concept.md).
+Candidates come from their own **domain-unscoped** search: a prerequisite
+routinely lives outside the dependent's domain or has none, and RF1.1 requires
+this to work when `domain:` is absent, which is the common case here.
+
+`requires::` is the only tier any consumer reads; `may_require::` is recorded
+for human review and is deliberately inert. Unlike relatedness, **no reciprocal
+backlink is written** — "A requires B" is a claim about A. Measure the gate
+with `pipeline eval-prerequisites` before trusting its output.
 
 ## `IngestRawMaterial`
 
@@ -105,6 +148,63 @@ resource), and the hub's own `## Derived concepts` list gets a reciprocal
 link back (`domain/linking.py::add_link_section`, deduped/idempotent) — the
 same shape as the relatedness backlinks below, just for source-document
 provenance instead of semantic relatedness.
+
+## `BackfillPrerequisites`
+
+*File: `backfill_prerequisites.py`*
+
+**Depends on:** `ConceptRepositoryPort`, `MetadataRepositoryPort`,
+`EmbeddingPort`, `VectorSearchPort`, `PrerequisiteJudgementSkillPort`,
+`EvalRubricsRepositoryPort`, `IndexConcept`
+
+**`run(limit=None, dry_run=False) -> list[BackfillOutcome]`** — emits
+prerequisite edges for concepts that predate the feature (`pipeline
+prerequisites`, RF1.4). The twin of `CategorizeConcepts`, with two deliberate
+differences: it does **not** skip concepts without a `domain` (prerequisites
+are not domain-scoped, and skipping would skip most of this vault), and it
+consults the existing `requires::` graph for cycles — which cannot arise at
+ingest, where a brand-new concept has no incoming edges.
+
+Idempotent, including for the inert tier: a concept already carrying a
+`may_require::` edge is left alone rather than re-judged, so re-running never
+quietly promotes an edge a human reviewed and left demoted.
+
+`dry_run` and `limit` exist because reaching the precision bar needs a cloud
+model, making a full pass hundreds of metered calls that rewrite the graph the
+study plan walks.
+
+## `EvaluatePrerequisites`
+
+*File: `evaluate_prerequisites.py`*
+
+**Depends on:** `ConceptRepositoryPort`, `PrerequisiteJudgementSkillPort`,
+`EvalRubricsRepositoryPort`
+
+**`run() -> PrecisionReport`** — measures the gate's precision against
+`evals/prerequisites-gold.json` (RF1.3). Judges each pair exactly as ingest
+does, so the number measures the gate rather than an approximation. Precision
+only; recall is reported and never gated. A gate that emits nothing scores
+0.0, not 1.0. Per-pair provider failures are recorded and excluded rather than
+counted as negatives.
+
+## `RelevanceEvidenceGatherer`
+
+*File: `relevance_evidence_gatherer.py`*
+
+**Depends on:** `MetadataRepositoryPort`, `ConceptRepositoryPort`,
+`RawMaterialRepositoryPort`
+
+**`gather(draft, candidates, source_id=None) -> RelevanceEvidence`** —
+satisfies `RelevanceEvidencePort`. A shared collaborator rather than a use
+case, the same shape as `CategoryMaterializer`. Reuses the caller's existing
+search results, so the relevance gate costs no extra embedding or query.
+
+Credibility signals are read from the `references/` hub, **not the draft**:
+`sources[]` is stamped by `IngestRawMaterial` *after* the agent runs, so a
+draft never carries its own provenance when it is judged. Bundle size counts
+content concepts only (structural types would otherwise let a young bundle
+clear the topicality floor), from the metadata index rather than by loading
+every file.
 
 ## `IndexConcept`
 

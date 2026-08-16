@@ -260,6 +260,42 @@ during `pipeline ingest` — this command is only needed once, to catch up
 content ingested before the feature existed (or after adding it to an
 existing vault).
 
+## `prerequisites [--limit N] [--dry-run]`
+
+```bash
+pipeline eval-prerequisites          # measure the gate FIRST
+pipeline prerequisites --dry-run -n 5
+pipeline prerequisites
+```
+
+Backfills `requires::` / `may_require::` edges for every concept that predates
+the feature (`BackfillPrerequisites`) — skips anything already carrying an
+edge, and anything of a structural type. New concepts get edges automatically
+during `pipeline ingest`; this catches up what came before.
+
+Unlike `categorize`, it does **not** skip concepts without a `domain`.
+Prerequisites are not domain-scoped, and most of this vault has no domain — so
+that guard would skip the backfill.
+
+Idempotent, including for the inert tier: a concept already carrying a
+`may_require::` edge is left alone rather than re-judged, so re-running never
+quietly promotes an edge a human reviewed and left demoted.
+
+**Measure before you run it.** The gate writes into the graph `tutor`'s study
+plan walks, and a wrong `requires::` edge sends the learner to study something
+they do not need with nothing downstream to catch it. `pipeline
+eval-prerequisites` reports precision against the labelled gold set; the bar
+is 0.9. Reaching it currently needs a cloud model (see
+[configuration](configuration.md#choosing-a-chat-provider)) — on `llama3.1:8b`
+the gate scored 0.517.
+
+That also makes a full pass several hundred metered calls, which is what
+`--dry-run` and `--limit` are for: `--dry-run -n 5` shows the edges it would
+write, with their rolled-up scores, without touching the vault.
+
+Two tiers are emitted. `requires::` is the only one any consumer reads;
+`may_require::` is recorded for human review and is deliberately inert.
+
 ## `lineage <concept-id> [--relation-type T] [--direction D] [--max-hops N]`
 
 ```bash
@@ -273,6 +309,41 @@ Runs `TraceLineage`: walks typed-relation edges (a Dataview-style
 every path found — the full chain, not just whether one exists — e.g. to
 answer "was this decision superseded, and by what, and was *that*
 superseded too."
+
+## `eval-prerequisites [--verbose]`
+
+```bash
+pipeline eval-prerequisites --verbose
+```
+
+Measures the prerequisite gate's precision against `evals/prerequisites-gold.json`,
+a set of human-labelled pairs (`EvaluatePrerequisites`, RF1.3). Exits non-zero
+below the 0.9 bar. Without it the gate is an LLM grading an LLM: the rubrics
+are scored by the same model whose judgement they are meant to constrain.
+
+Precision only. A wrong `requires::` edge sends the learner to study something
+they do not need and nothing catches it; a missed one only costs the planner a
+dependency it could have used. Recall is reported but never gated.
+
+Each pair is judged exactly the way ingest judges one — same skill, same
+rubrics, same threshold, same rollup — so the number measures the gate rather
+than an approximation of it. A gate that emits nothing scores 0.0, not 1.0:
+vacuous precision means the rubrics were never exercised.
+
+**Gold-set entries read "source requires target"** — the dependent is stated
+first, matching where the edge is written (see
+[ADR 0002](../../../docs/adr/0002-prerequisite-edges-are-written-on-the-dependent-concept.md)).
+A transposed set is not obviously wrong from its contents and has already cost
+one full measurement cycle.
+
+Two failure modes worth recognising in the output:
+
+- **`ERR` rows** — the provider failed on that pair (a reasoning model
+  returning empty content is the common one). Errored pairs are excluded from
+  precision rather than counted as negatives, since an unmeasured pair says
+  nothing about the rubrics.
+- **`emitted as requires` close to `pairs`** — the gate is accepting nearly
+  everything and has stopped discriminating, whatever its precision reads.
 
 ## `log [--limit N]`
 
