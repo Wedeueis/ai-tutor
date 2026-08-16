@@ -14,6 +14,10 @@ dependencies = [
     # *client*, so it follows the client-side pin the ADK toolset is known to
     # work with. The two deployables deliberately do not share a venv.
     "mcp>=1.9.0,<2.0.0",
+    # `get_concept` returns rendered markdown with YAML frontmatter, so the
+    # vault adapter parses OKF frontmatter itself. `pipeline` owns writing it;
+    # this only ever reads.
+    "pyyaml>=6.0.3",
 ]
 
 [build-system]
@@ -63,7 +67,7 @@ module = ["tutor.domain.*", "tutor.application.*"]
 disallow_untyped_defs = true
 
 [[tool.mypy.overrides]]
-module = ["fsrs.*", "google.adk.*", "litellm.*"]
+module = ["fsrs.*", "google.adk.*", "litellm.*", "yaml.*"]
 ignore_missing_imports = true
 
 [tool.ruff]

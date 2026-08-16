@@ -7,7 +7,15 @@ that is a filesystem concern and does not belong on this port.
 Nothing here is modelled as local state. `Concept`, `Domain`, `Category` and
 `requires::` edges are read through this port every time they are needed —
 duplicating them into `learner.db` would make the vault's copy and ours drift,
-and the vault is authoritative for all of it."""
+and the vault is authoritative for all of it.
+
+**Async, unlike the sketch in PRD v3 §5.** Every method here is a network call
+to `pipeline`'s MCP server, and both sides of this seam are already async: the
+MCP client offers no sync API, and ADK runs the tutor inside an event loop.
+A synchronous port would have to either block that loop for the duration of
+each vault read, or call `asyncio.run` from inside a running loop, which
+raises. `LearnerStorePort` stays synchronous — SQLite on the local disk is a
+genuinely different kind of call."""
 
 from __future__ import annotations
 
@@ -49,11 +57,11 @@ class Edge:
 
 
 class VaultPort(Protocol):
-    def get_concept(self, concept_id: str) -> Concept: ...
+    async def get_concept(self, concept_id: str) -> Concept: ...
 
-    def search(self, query: str, k: int = 5) -> list[ConceptMatch]: ...
+    async def search(self, query: str, k: int = 5) -> list[ConceptMatch]: ...
 
-    def prerequisites(self, concept_id: str, max_hops: int = 3) -> list[Edge]:
+    async def prerequisites(self, concept_id: str, max_hops: int = 3) -> list[Edge]:
         """Walks `requires::` edges via the existing `trace_lineage` MCP tool —
         no new tool needed (RF3.1).
 
