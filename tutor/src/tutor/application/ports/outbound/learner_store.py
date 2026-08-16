@@ -33,6 +33,19 @@ class LearnerStorePort(Protocol):
         maintained by remembering to clear a table (PRD v3 §7)."""
         ...
 
+    def has_discursive_evidence(self, concept_id: str) -> bool:
+        """Has this concept ever been reviewed by a free-text answer graded
+        against a rubric, rather than a self-reported recall grade?
+
+        A question about the **log**, not about the projection — which is why
+        it is its own method rather than a field on `SchedulerState`. FSRS
+        state records how durable the memory is; this records what kind of
+        evidence produced it, and the `specialist` depth level asks for both
+        (RF4.4). Explaining something in your own words is different evidence
+        from recognising it, and nothing in a stability number distinguishes
+        them."""
+        ...
+
     def replay(self, concept_id: str | None = None) -> None:
         """Rebuilds projections from the log — one concept, or all of them.
 

@@ -10,6 +10,7 @@ Pure domain. No I/O, nothing to mock."""
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 
@@ -74,6 +75,24 @@ argue from."""
 
 def requirement_for(level: DepthLevel) -> DepthRequirement:
     return REQUIREMENTS[level]
+
+
+def deepest(levels: Iterable[DepthLevel]) -> DepthLevel:
+    """The most demanding of several targets, or `aware` if there are none.
+
+    A concept belongs to as many Categories as `pipeline` classified it into,
+    and each can carry its own target. Taking the deepest is the only rule
+    under which *adding* a Category cannot quietly lower what is asked of a
+    concept — otherwise "specialise in GraphRAG" would be undone the moment
+    those concepts were also filed under a broad `aware` Category.
+
+    Ordered by the stability threshold rather than by declaration order, so the
+    ordering keeps meaning if a level is ever inserted between two others."""
+    return max(
+        levels,
+        key=lambda level: REQUIREMENTS[level].stability_days,
+        default=DEFAULT_DEPTH_LEVEL,
+    )
 
 
 def meets_target(

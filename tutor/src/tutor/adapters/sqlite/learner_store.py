@@ -98,6 +98,16 @@ class SqliteLearnerStore:
             ).fetchall()
         return [_as_event(row) for row in rows]
 
+    def has_discursive_evidence(self, concept_id: str) -> bool:
+        """Read off the log, not off a projection: it is a fact about what
+        happened, and no FSRS state carries it (RF4.4). `LIMIT 1` because the
+        question is whether one such review exists, not how many."""
+        row = self._connection.execute(
+            "SELECT 1 FROM review_events WHERE concept_id = ? AND discursive = 1 LIMIT 1",
+            (concept_id,),
+        ).fetchone()
+        return row is not None
+
     # --- projections -----------------------------------------------------
 
     def scheduler_state(self, concept_id: str) -> SchedulerState | None:
