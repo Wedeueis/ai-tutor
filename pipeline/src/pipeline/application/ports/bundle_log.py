@@ -28,3 +28,10 @@ class BundleLogPort(Protocol):
     ) -> None: ...
 
     def list_entries(self) -> list[LogEntry]: ...
+
+    def clear(self) -> int:
+        """Discards the whole trail, returning how many entries were dropped.
+        Only meaningful when the bundle it describes is being reset too — an
+        audit trail of decisions about concepts that no longer exist is noise,
+        but dropping one while those concepts remain destroys real history."""
+        ...

@@ -239,6 +239,31 @@ its own; `Container` calls `ConceptRepositoryPort.delete` +
 `MetadataRepositoryPort.delete` + `VectorSearchPort.delete` directly) for
 the actual cleanup action. Backs `pipeline audit`.
 
+## `ClearBundle`
+
+*File: `clear_bundle.py`*
+
+**Depends on:** `ConceptRepositoryPort`, `MetadataRepositoryPort`,
+`VectorSearchPort`, `IntakeRepositoryPort`, `BundleLogPort`
+
+**`plan(reset_intake=False, reset_log=False) -> ClearReport`** — what a clear
+with the same flags would remove (concept ids, plus intake item ids and an
+audit-entry count for whichever resets are requested), changing nothing; backs
+`pipeline clear --dry-run`.
+
+**`run(reset_intake=False, reset_log=False) -> ClearReport`** — deletes every
+concept from all three stores that describe it (markdown file, metadata row,
+vector) and appends one `delete` audit entry per concept. `vault/raw/` and
+reserved `index.md` files are never touched, under any flag. The two resets
+are opt-in because each drops history rather than derived state: without
+`reset_intake` the tracker still reports the raw material as ingested, so a
+following `pipeline ingest` finds nothing and the vault stays empty; with it,
+everything under `vault/raw/` becomes re-ingestable from scratch.
+`reset_log` calls `BundleLogPort.clear()` **last**, so the delete entries this
+run just appended go with it and the trail ends empty rather than opening with
+a record of its own truncation. The bulk counterpart to `pipeline delete`.
+Backs `pipeline clear`.
+
 ## `RebuildIndex`
 
 *File: `rebuild_index.py`*

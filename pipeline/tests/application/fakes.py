@@ -166,6 +166,11 @@ class FakeBundleLog:
     def list_entries(self):
         return list(reversed(self.entries))
 
+    def clear(self) -> int:
+        dropped = len(self.entries)
+        self.entries.clear()
+        return dropped
+
 
 class FakeExtractionSkill:
     def __init__(self, drafts_by_raw_id: dict[str, list[DraftConcept]]) -> None:

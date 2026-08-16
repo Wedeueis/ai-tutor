@@ -50,6 +50,7 @@ from pipeline.application.use_cases.audit_concept_quality import AuditConceptQua
 from pipeline.application.use_cases.backfill_prerequisites import BackfillPrerequisites
 from pipeline.application.use_cases.categorize_concepts import CategorizeConcepts
 from pipeline.application.use_cases.category_materializer import CategoryMaterializer
+from pipeline.application.use_cases.clear_bundle import ClearBundle
 from pipeline.application.use_cases.evaluate_prerequisites import EvaluatePrerequisites
 from pipeline.application.use_cases.index_concept import IndexConcept
 from pipeline.application.use_cases.ingest_raw_material import IngestRawMaterial
@@ -240,6 +241,13 @@ class Container:
         self.trace_lineage = TraceLineage(self.metadata_repository)
         self.scan_intake = ScanIntake(self.scanner, self.intake_repository)
         self.prune_stale_intake = PruneStaleIntake(self.intake_repository)
+        self.clear_bundle = ClearBundle(
+            concept_repository=self.concept_repository,
+            metadata_repository=self.metadata_repository,
+            vector_search=self.vector_search,
+            intake_repository=self.intake_repository,
+            bundle_log=self.bundle_log,
+        )
         self.parse_source_documents = ParseSourceDocuments(
             self.intake_repository,
             self.document_parser,
@@ -414,6 +422,72 @@ def delete_concept(path: str) -> None:
         message=f"Removed {concept.frontmatter.title or concept_id}.",
     )
     typer.echo(f"deleted {concept_id}")
+
+
+@app.command(name="clear")
+def clear_command(
+    reset_intake: bool = typer.Option(
+        False,
+        "--reset-intake",
+        help="Also forget every intake row, so vault/raw/ can be re-scanned "
+        "and re-ingested from scratch.",
+    ),
+    reset_log: bool = typer.Option(
+        False,
+        "--reset-log",
+        help="Also drop the pipeline's audit log (create/merge/reject/delete "
+        "history), leaving no record that any of it happened.",
+    ),
+    all_: bool = typer.Option(
+        False, "--all", help="Full reset: implies --reset-intake and --reset-log."
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show what would be removed; change nothing."
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+) -> None:
+    """Empty the vault: remove every concept plus its metadata/vector entries.
+    The bulk counterpart to `delete`. `vault/raw/` is never touched — even a
+    full reset keeps the raw material, since that's what you'd re-ingest from.
+    Without `--reset-intake` the intake tracker still considers that material
+    processed, so a following `ingest` will not refill the vault."""
+    reset_intake = reset_intake or all_
+    reset_log = reset_log or all_
+
+    container = _container()
+    report = container.clear_bundle.plan(reset_intake=reset_intake, reset_log=reset_log)
+
+    if report.is_empty:
+        typer.echo("Nothing to clear.")
+        return
+
+    for concept_id in report.concept_ids:
+        typer.echo(f"{'would delete' if dry_run else 'delete'} {concept_id}")
+    if reset_intake:
+        typer.echo(f"{len(report.intake_ids)} intake item(s) would be forgotten")
+    if reset_log:
+        typer.echo(f"{report.log_entries} audit log entr(y/ies) would be dropped")
+
+    if dry_run:
+        return
+
+    if not yes:
+        typer.confirm(
+            f"Delete {len(report.concept_ids)} concept(s) from {container.settings.vault_path}?",
+            abort=True,
+        )
+
+    result = container.clear_bundle.run(reset_intake=reset_intake, reset_log=reset_log)
+    typer.echo(f"cleared {len(result.concept_ids)} concept(s)")
+    if reset_intake:
+        typer.echo(f"forgot {len(result.intake_ids)} intake item(s)")
+    else:
+        typer.echo(
+            "intake left untouched — run with --reset-intake to make vault/raw/ "
+            "re-ingestable."
+        )
+    if reset_log:
+        typer.echo(f"dropped {result.log_entries} audit log entr(y/ies)")
 
 
 @app.command(name="index")

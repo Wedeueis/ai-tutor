@@ -188,6 +188,46 @@ links, and rewriting arbitrary other files as a side effect of a delete
 would be a much bigger blast radius than the delete itself. Exits `1` if the
 concept doesn't exist.
 
+## `clear`
+
+```bash
+pipeline clear --dry-run          # show what would go, change nothing
+pipeline clear                    # asks for confirmation first
+pipeline clear --yes --reset-intake
+pipeline clear --yes --all        # full reset: concepts + intake + audit log
+```
+
+The bulk counterpart to `delete`: removes **every** concept from the vault
+along with its metadata and vector entries, and appends one `delete` audit
+entry per concept. Prints one line per concept, then a count.
+
+Never touched, whatever the flags:
+
+- **`vault/raw/`** — the capture inbox is input, not derived state. Even a
+  full reset keeps it: that's the material you'd re-ingest from.
+- **reserved `index.md` files** — never concepts (`MarkdownConceptRepository.
+  list()` skips them), so they survive and keep listing a now-empty directory
+  until you rewrite them.
+
+Two further layers are opt-in, because each drops real history rather than
+derived state the vault could rebuild:
+
+- `--reset-intake` forgets every intake row. Without it the tracker still
+  considers everything under `vault/raw/` already ingested, so a following
+  `ingest` finds nothing to do and the vault stays empty — this is the flag
+  you want for "re-ingest everything from scratch". The cost is losing which
+  files errored or were rejected.
+- `--reset-log` drops the pipeline's audit trail (`pipeline log`, the
+  `okf://log` MCP resource) — including the `delete` entries this very run
+  would otherwise leave behind, since the log is cleared last. Use it when the
+  goal is a bundle with no history at all, rather than one whose history
+  records that it was emptied.
+- `--all` implies both.
+
+`--dry-run` prints the plan (concepts, and counts for whichever resets are
+requested) and exits; otherwise the command confirms interactively unless
+`--yes`/`-y` is passed.
+
 ## `index`
 
 ```bash

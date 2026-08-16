@@ -52,5 +52,10 @@ class SqliteBundleLog:
             for row in rows
         ]
 
+    def clear(self) -> int:
+        with self._connection:
+            cursor = self._connection.execute("DELETE FROM bundle_log")
+            return cursor.rowcount
+
     def close(self) -> None:
         self._pool.close()

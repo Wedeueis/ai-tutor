@@ -19,7 +19,7 @@ them inherit from the `Protocol` class.
 | `DocumentParsingPort` | `parse` | `docling.document_parser.DoclingDocumentParser` | [Docling](https://github.com/docling-project/docling) — layout-aware PDF/DOCX/PPTX/XLSX/image parsing |
 | `SchemaRegistryPort` | `get_schema` | `schema_registry.json_file_schema_registry.JsonFileSchemaRegistry` | `pipeline/schemas/<Type>.schema.json`, falling back to `_base.schema.json` |
 | `EvalRubricsRepositoryPort` | `load_for_domain` | `eval_rubrics.json_file_eval_rubrics_repository.JsonFileEvalRubricsRepository` | `pipeline/evals/<domain-id>.json`, falling back to `_base.json` |
-| `BundleLogPort` | `append`, `list_entries` | `sqlite.sqlite_bundle_log.SqliteBundleLog` | SQLite `bundle_log` table — structured ingest audit trail. This is pipeline governance state, not vault content: WIKI_SPEC.md §9's `log.md` is optional and this bundle intentionally doesn't populate it (see `pipeline log`, the `okf://log` MCP resource). |
+| `BundleLogPort` | `append`, `list_entries`, `clear` | `sqlite.sqlite_bundle_log.SqliteBundleLog` | SQLite `bundle_log` table — structured ingest audit trail. This is pipeline governance state, not vault content: WIKI_SPEC.md §9's `log.md` is optional and this bundle intentionally doesn't populate it (see `pipeline log`, the `okf://log` MCP resource). |
 | `ExecutorPort` | `run` | `stubs.not_implemented_executor.NotImplementedExecutor` | **Stub** — raises `NotImplementedError` (OKF §10.2, no computation exists yet) |
 | `AttesterPort` | `verify` | `stubs.not_implemented_attester.NotImplementedAttester` | **Stub** — raises `NotImplementedError` (OKF §10.2) |
 

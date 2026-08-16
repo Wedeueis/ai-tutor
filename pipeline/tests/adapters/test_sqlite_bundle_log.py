@@ -33,6 +33,28 @@ def test_reject_entries_have_no_concept_id(tmp_path):
     log.close()
 
 
+def test_clear_drops_every_entry_and_returns_the_count(tmp_path):
+    log = SqliteBundleLog(tmp_path / "metadata.db", clock=lambda: datetime(2026, 8, 9))
+    log.append(action="create", concept_id="a", raw_id="raw-1", message="Added A.")
+    log.append(action="delete", concept_id="a", raw_id=None, message="Removed A.")
+
+    assert log.clear() == 2
+    assert log.list_entries() == []
+    assert log.clear() == 0
+    log.close()
+
+
+def test_clear_leaves_the_table_usable(tmp_path):
+    log = SqliteBundleLog(tmp_path / "metadata.db", clock=lambda: datetime(2026, 8, 9))
+    log.append(action="create", concept_id="a", raw_id="raw-1", message="Added A.")
+    log.clear()
+
+    log.append(action="create", concept_id="b", raw_id="raw-2", message="Added B.")
+
+    assert [entry.concept_id for entry in log.list_entries()] == ["b"]
+    log.close()
+
+
 def test_list_entries_empty_when_nothing_appended(tmp_path):
     log = SqliteBundleLog(tmp_path / "metadata.db")
     assert log.list_entries() == []
