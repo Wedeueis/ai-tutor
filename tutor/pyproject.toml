@@ -8,6 +8,10 @@ requires-python = ">=3.12"
 # pipeline's MCP server (PRD v3 §2, rule 1) — no Python import, no shared
 # virtualenv, no shared SQLite file. The two must evolve on independent cycles.
 dependencies = [
+    # ADK's session store runs on an asyncio SQLAlchemy engine, which refuses
+    # the synchronous pysqlite driver. `google-adk[db]` pulls SQLAlchemy but not
+    # this, and without it the session service fails at construction.
+    "aiosqlite>=0.22.1",
     # `[db]` is `DatabaseSessionService` (§7): ADK's session store is its own
     # SQLite file, deliberately not `learner.db`. ADK is pre-1.0 in spirit and
     # its session schema will churn; the review history is the one thing here

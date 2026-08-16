@@ -134,6 +134,12 @@ class AdkTeachingTurn:
             app_name=APP_NAME,
             agent=build_agent(concept, context, settings=self._settings),
             session_service=self._session_service,  # type: ignore[arg-type]
+            # Required, and not a convenience: `Runner` defaults to raising
+            # `SessionNotFoundError` for an id it has not seen. Since a new
+            # runner is built per turn, the first one has to open the session
+            # and every later one has to find it — which is exactly
+            # get-or-create.
+            auto_create_session=True,
         )
         content = types.Content(role="user", parts=[types.Part(text=message)])
         async for event in runner.run_async(

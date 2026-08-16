@@ -88,8 +88,13 @@ class Settings:
             learner_db_path=Path(
                 os.environ.get("LEARNER_DB_PATH", str(data_dir / "learner.db"))
             ),
+            # `sqlite+aiosqlite`, not bare `sqlite`: ADK's
+            # `DatabaseSessionService` builds an asyncio engine and SQLAlchemy
+            # refuses the synchronous pysqlite driver outright. A plain
+            # `sqlite:///` URL fails at construction, before any session runs.
             session_db_url=os.environ.get(
-                "TUTOR_SESSION_DB_URL", f"sqlite:///{data_dir / 'sessions.db'}"
+                "TUTOR_SESSION_DB_URL",
+                f"sqlite+aiosqlite:///{data_dir / 'sessions.db'}",
             ),
             # The two directories `tutor` may write to, and the only ones.
             # `vault/raw/` is a capture surface, explicitly not part of the OKF
