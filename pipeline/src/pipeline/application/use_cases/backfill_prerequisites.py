@@ -135,7 +135,7 @@ class BackfillPrerequisites:
     def _candidates_for(self, concept: Concept) -> list[PrerequisiteCandidate]:
         """Domain-unscoped, like the ingest path: a prerequisite routinely
         lives outside the dependent's domain, or carries none at all."""
-        vector = self._embedding.embed(concept.body)
+        vector = self._embedding.embed_document(concept.body)
         candidates = []
         for match in self._vector_search.query(vector, k=self._candidate_k, where=None):
             if str(match.concept_id) == str(concept.id):

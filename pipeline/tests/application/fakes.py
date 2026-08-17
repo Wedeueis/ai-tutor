@@ -289,8 +289,24 @@ class FakeEvalRubricsRepository:
 
 
 class FakeEmbedding:
-    def embed(self, text: str) -> list[float]:
+    """Distinguishable vectors per side, on purpose.
+
+    A document and a query of the same text embed to *different* vectors here,
+    so a call site that asks for the wrong one fails a test instead of quietly
+    degrading retrieval — which is exactly how the missing prefixes went
+    unnoticed under the old single-verb port."""
+
+    def __init__(self) -> None:
+        self.documents: list[str] = []
+        self.queries: list[tuple[str, str | None]] = []
+
+    def embed_document(self, text: str) -> list[float]:
+        self.documents.append(text)
         return [float(len(text))]
+
+    def embed_query(self, text: str, task: str | None = None) -> list[float]:
+        self.queries.append((text, task))
+        return [-float(len(text))]
 
 
 class FakeVectorSearch:

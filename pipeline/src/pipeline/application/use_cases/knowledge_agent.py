@@ -128,7 +128,9 @@ class KnowledgeAgent:
         for draft in drafts:
             domain = self._classify_domain(draft)
 
-            vector = self._embedding.embed(draft.body)
+            # A draft compared against stored concepts is document-vs-document
+            # similarity, not a search — a query prefix would skew it.
+            vector = self._embedding.embed_document(draft.body)
             where = {"domain": str(domain)} if domain is not None else None
             candidates = self._vector_search.query(vector, k=5, where=where)
 

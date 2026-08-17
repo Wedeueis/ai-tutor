@@ -81,10 +81,33 @@ def test_an_absent_api_key_reads_as_none_not_empty_string(monkeypatch):
 
 def test_the_embedding_model_is_unaffected_by_the_provider(monkeypatch):
     """Every vector in ChromaDB came from one embedding model; changing it
-    invalidates the index rather than improving it."""
+    invalidates the index rather than improving it.
+
+    Asserted against the default constant rather than a literal: the claim is
+    that switching *chat* provider leaves embeddings alone, which has nothing
+    to do with which embedding model is current."""
+    from pipeline.config import DEFAULT_EMBED_MODEL
+
     monkeypatch.setenv("CHAT_PROVIDER", "openrouter")
 
-    assert Settings.from_env().ollama_embed_model == "nomic-embed-text"
+    assert Settings.from_env().ollama_embed_model == DEFAULT_EMBED_MODEL
+
+
+def test_the_default_embedding_model_is_multilingual():
+    """The vault takes material in English and Portuguese. `nomic-embed-text`
+    is English-centric and was measurably weaker on Brazilian Portuguese."""
+    from pipeline.config import DEFAULT_EMBED_MODEL
+
+    assert DEFAULT_EMBED_MODEL != "nomic-embed-text"
+    assert DEFAULT_EMBED_MODEL.startswith("qwen3-embedding")
+
+
+def test_the_query_instruction_is_set_by_default(monkeypatch):
+    """An empty instruction silently disables prefixing, which is exactly the
+    bug the port split exists to prevent — so the default must not be empty."""
+    monkeypatch.delenv("EMBED_QUERY_INSTRUCTION", raising=False)
+
+    assert Settings.from_env().embed_query_instruction.strip() != ""
 
 
 def test_the_default_openrouter_model_is_not_a_premium_one():

@@ -95,7 +95,7 @@ file auto-skips (rather than failing) when Ollama isn't running locally —
 this is why `uv run pytest -q` passes cleanly in CI or on a machine without
 Ollama, while still exercising real model calls when it's available. It
 assumes the same default models as `config.py` (`llama3.1:8b`,
-`nomic-embed-text`) rather than reading `Settings` — if you change the
+`qwen3-embedding:0.6b`) rather than reading `Settings` — if you change the
 defaults, update the constants at the top of that file too.
 
 **When you add a new adapter test that needs Ollama**, mark it

@@ -28,6 +28,9 @@ from pipeline.application.ports.concept_repository import ConceptRepositoryPort
 from pipeline.application.ports.intake_repository import IntakeRepositoryPort
 from pipeline.application.ports.metadata_repository import MetadataRepositoryPort
 from pipeline.application.ports.vector_search import VectorSearchPort
+from pipeline.application.use_cases.ensure_index_fingerprint import (
+    EnsureIndexFingerprint,
+)
 from pipeline.domain.intake import IntakeState
 
 
@@ -52,12 +55,14 @@ class ClearBundle:
         vector_search: VectorSearchPort,
         intake_repository: IntakeRepositoryPort,
         bundle_log: BundleLogPort,
+        fingerprint: EnsureIndexFingerprint | None = None,
     ) -> None:
         self._concept_repository = concept_repository
         self._metadata_repository = metadata_repository
         self._vector_search = vector_search
         self._intake_repository = intake_repository
         self._bundle_log = bundle_log
+        self._fingerprint = fingerprint
 
     def plan(self, reset_intake: bool = False, reset_log: bool = False) -> ClearReport:
         """What `run()` with the same flags would remove, changing nothing —
@@ -82,6 +87,13 @@ class ClearBundle:
                 raw_id=None,
                 message=f"Cleared bundle — removed {concept.frontmatter.title or concept_id}.",
             )
+
+        if report.concept_ids and self._fingerprint is not None:
+            # Every vector just went away, so the record of what produced them
+            # must too — otherwise the next index run is checked against a
+            # fingerprint describing an index that no longer exists, and a
+            # deliberate model change still looks like corruption.
+            self._fingerprint.forget()
 
         for item_id in report.intake_ids:
             self._intake_repository.delete(item_id)

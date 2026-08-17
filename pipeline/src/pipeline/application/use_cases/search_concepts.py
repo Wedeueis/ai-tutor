@@ -5,6 +5,9 @@ from datetime import date
 from pipeline.application.ports.embedding import EmbeddingPort
 from pipeline.application.ports.metadata_repository import MetadataRepositoryPort
 from pipeline.application.ports.vector_search import VectorSearchPort
+from pipeline.application.use_cases.ensure_index_fingerprint import (
+    EnsureIndexFingerprint,
+)
 from pipeline.domain.agent import CandidateMatch
 from pipeline.domain.concept import ConceptId
 from pipeline.domain.search import DEFAULT_RRF_K, reciprocal_rank_fusion
@@ -39,7 +42,9 @@ class SearchConcepts:
         graph_category_decay: float = DEFAULT_GRAPH_CATEGORY_DECAY,
         rrf_k: int = DEFAULT_RRF_K,
         structured_min_results: int = DEFAULT_STRUCTURED_MIN_RESULTS,
+        fingerprint: EnsureIndexFingerprint | None = None,
     ) -> None:
+        self._fingerprint = fingerprint
         self._embedding = embedding
         self._vector_search = vector_search
         self._metadata_repository = metadata_repository
@@ -67,7 +72,13 @@ class SearchConcepts:
                     for cid in structural_ids[:k]
                 ]
 
-        vector = self._embedding.embed(query)
+        # A *read* against an index built by a different model is the silent
+        # corruption this guard exists for — checked here, not only on write.
+        if self._fingerprint is not None:
+            self._fingerprint.check()
+        # The only true query in the codebase: everything else embedding
+        # touches is a document being compared against other documents.
+        vector = self._embedding.embed_query(query)
         semantic = self._vector_search.query(vector, k=self._pool_k)
         lexical = self._metadata_repository.search_fts(query, k=self._pool_k)
 

@@ -32,7 +32,7 @@ The pipeline assumes three Ollama models by default (see
 
 ```bash
 ollama pull llama3.1:8b       # chat model — extraction, classification, quality eval
-ollama pull nomic-embed-text  # embedding model — vector search
+ollama pull qwen3-embedding:0.6b  # embedding model — vector search
 ollama pull llava             # vision model — image captioning (only used when parsing PDFs/decks with images)
 ```
 

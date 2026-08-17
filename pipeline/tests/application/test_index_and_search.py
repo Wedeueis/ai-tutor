@@ -156,3 +156,36 @@ def test_search_concepts_graph_only_hit_never_outranks_a_fused_hit():
     results = use_case.run("query")
 
     assert [r.concept_id for r in results] == [ConceptId("a"), ConceptId("graph-neighbor")]
+
+
+# --- which side of the embedding each call site is on ---------------------
+
+
+def test_indexing_embeds_the_body_as_a_document():
+    """A concept being stored is a document. `FakeEmbedding` returns different
+    vectors per side, so a swapped call here fails rather than degrading
+    retrieval quietly — the way the missing prefixes did for a year."""
+    embedding = FakeEmbedding()
+    concept = Concept(
+        id=ConceptId("notes/x"),
+        frontmatter=Frontmatter(type="Playbook"),
+        body="Body text.",
+    )
+
+    IndexConcept(embedding, FakeVectorSearch(), FakeMetadataRepository()).run(concept)
+
+    assert embedding.documents == ["Body text."]
+    assert embedding.queries == []
+
+
+def test_searching_embeds_the_query_as_a_query():
+    """The only true query in the codebase. Everything else the embedding port
+    touches is a document compared against other documents."""
+    embedding = FakeEmbedding()
+
+    SearchConcepts(embedding, FakeVectorSearch(), FakeMetadataRepository()).run(
+        "how do I brew cold coffee"
+    )
+
+    assert embedding.queries == [("how do I brew cold coffee", None)]
+    assert embedding.documents == []

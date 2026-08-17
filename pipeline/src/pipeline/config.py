@@ -58,6 +58,31 @@ class ChatProvider(str, Enum):
     OPENROUTER = "openrouter"
 
 DEFAULT_OPENROUTER_CHAT_MODEL = "deepseek/deepseek-v4-flash-0731"
+
+DEFAULT_EMBED_MODEL = "qwen3-embedding:0.6b"
+"""**Not `nomic-embed-text`.** The vault takes material in English *and*
+Portuguese, and nomic is English-centric: on MTEB-BR (a Brazilian-Portuguese
+benchmark over 93 models) the Qwen3-Embedding family leads the open models,
+while multilingual-leaderboard rank predicts Portuguese performance only
+loosely (ρ≈0.75).
+
+`0.6b` rather than `4b` for a hardware reason, not a quality one: ingest
+alternates chat and embedding calls per chunk, and both models share one 8GB
+GPU with the chat model. At ~640MB this stays resident alongside it; the 4B
+would evict it on every alternation.
+
+32k of context is the other half — it lifts the ceiling on chunk size, which
+matters once source documents are books."""
+
+DEFAULT_EMBED_QUERY_INSTRUCTION = (
+    "Given a search query, retrieve relevant passages and concepts that answer it"
+)
+"""What a *query* is for. Qwen3-Embedding is instruction-aware and expects this
+on the query side only.
+
+Safe to edit at any time: the document side carries no instruction, so changing
+this re-tunes retrieval without invalidating a single stored vector. Set it
+empty to disable prefixing entirely, which is what a non-instruct model wants."""
 """Cost is a first-class constraint on this project — it is a personal vault,
 and a full prerequisite backfill is hundreds of calls. A premium model is not
 a default here, and a cheap model underperforming is a reason to fix the
@@ -112,6 +137,7 @@ class Settings:
     ollama_chat_model: str
     ollama_relatedness_model: str
     ollama_embed_model: str
+    embed_query_instruction: str
     ollama_vision_model: str
     ollama_timeout_seconds: float
     ollama_max_predict_tokens: int
@@ -196,7 +222,12 @@ class Settings:
             ollama_host=os.environ.get("OLLAMA_HOST", "http://localhost:11434"),
             ollama_chat_model=chat_model,
             ollama_relatedness_model=os.environ.get("OLLAMA_RELATEDNESS_MODEL", chat_model),
-            ollama_embed_model=os.environ.get("OLLAMA_EMBED_MODEL", "nomic-embed-text"),
+            ollama_embed_model=os.environ.get(
+                "OLLAMA_EMBED_MODEL", DEFAULT_EMBED_MODEL
+            ),
+            embed_query_instruction=os.environ.get(
+                "EMBED_QUERY_INSTRUCTION", DEFAULT_EMBED_QUERY_INSTRUCTION
+            ),
             ollama_vision_model=os.environ.get("OLLAMA_VISION_MODEL", "llava"),
             ollama_timeout_seconds=_float_env("OLLAMA_TIMEOUT_SECONDS", 300.0),
             ollama_max_predict_tokens=_int_env("OLLAMA_MAX_PREDICT_TOKENS", 2048),

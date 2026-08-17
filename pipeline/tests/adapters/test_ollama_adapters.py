@@ -14,14 +14,28 @@ from pipeline.domain.raw_material import RawItem
 pytestmark = pytest.mark.integration
 
 CHAT_MODEL = "llama3.1:8b"
-EMBED_MODEL = "nomic-embed-text"
+EMBED_MODEL = "qwen3-embedding:0.6b"
 
 
-def test_embed_returns_a_nonempty_vector():
+def test_embed_document_returns_a_nonempty_vector():
     client = OllamaClient("http://localhost:11434")
-    vector = OllamaEmbedding(client, EMBED_MODEL).embed("espresso extraction ratio")
+    vector = OllamaEmbedding(client, EMBED_MODEL).embed_document(
+        "espresso extraction ratio"
+    )
     assert len(vector) > 0
     assert all(isinstance(x, float) for x in vector)
+
+
+def test_a_query_and_a_document_of_the_same_text_differ():
+    """The prefix has to actually reach the model. If it did not, these two
+    would be identical — which is precisely the state the old single-verb port
+    was silently in."""
+    client = OllamaClient("http://localhost:11434")
+    embedding = OllamaEmbedding(
+        client, EMBED_MODEL, query_instruction="Given a query, retrieve passages"
+    )
+
+    assert embedding.embed_query("ratio") != embedding.embed_document("ratio")
 
 
 def test_extraction_returns_at_least_one_draft():

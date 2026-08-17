@@ -14,7 +14,7 @@ service, no external API key, in the loop.
 
 ```bash
 make install   # or: uv sync
-ollama pull llama3.1:8b nomic-embed-text llava
+ollama pull llama3.1:8b qwen3-embedding:0.6b llava
 
 # put something in the capture inbox, then run it through the pipeline
 echo "Cold brew steeps 12-24 hours in cold water, coarser grind than drip." \
