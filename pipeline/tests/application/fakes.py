@@ -399,6 +399,9 @@ class FakeMetadataRepository:
             if concept_id not in seed_ids
         }
 
+    def list_ids(self) -> list[str]:
+        return sorted(self.upserted)
+
     def delete(self, concept_id: str) -> None:
         self.upserted.pop(concept_id, None)
 

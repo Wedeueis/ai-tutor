@@ -57,9 +57,9 @@ def test_rebuild_index_reindexes_every_concept():
     metadata_repository = FakeMetadataRepository()
     index_concept = IndexConcept(FakeEmbedding(), vector_search, metadata_repository)
 
-    count = RebuildIndex(concept_repository, index_concept).run()
+    report = RebuildIndex(concept_repository, index_concept).run()
 
-    assert count == 2
+    assert report.indexed == 2
     assert set(vector_search.upserted) == {"a", "b"}
 
 
@@ -189,3 +189,49 @@ def test_searching_embeds_the_query_as_a_query():
 
     assert embedding.queries == [("how do I brew cold coffee", None)]
     assert embedding.documents == []
+
+
+def _concept(concept_id: str) -> Concept:
+    return Concept(
+        id=ConceptId(concept_id), frontmatter=Frontmatter(type="Playbook"), body="b"
+    )
+
+
+def test_rebuild_prunes_rows_for_concepts_the_bundle_no_longer_has():
+    """The half `RebuildIndex` was missing. `ClearBundle` derives what to delete
+    from `ConceptRepositoryPort.list()`, so a file already gone is a file it
+    never sees — and the leftover rows are not inert: `links` feeds
+    `expand_neighbors`, so a deleted concept keeps bridging graph expansion."""
+    concept_repository = FakeConceptRepository()
+    concept_repository.save(_concept("still/here"))
+    metadata_repository = FakeMetadataRepository()
+    metadata_repository.upsert(_concept("still/here"))
+    metadata_repository.upsert(_concept("deleted/long/ago"))
+    vector_search = FakeVectorSearch()
+    vector_search.upsert("deleted/long/ago", [1.0], metadata={})
+
+    report = RebuildIndex(
+        concept_repository,
+        IndexConcept(FakeEmbedding(), vector_search, metadata_repository),
+        metadata_repository,
+        vector_search,
+    ).run()
+
+    assert report.pruned == ["deleted/long/ago"]
+    assert "deleted/long/ago" not in metadata_repository.list_ids()
+    assert "deleted/long/ago" not in vector_search.upserted
+
+
+def test_rebuild_prunes_nothing_when_the_bundle_matches():
+    concept_repository = FakeConceptRepository()
+    concept_repository.save(_concept("a/b"))
+    metadata_repository = FakeMetadataRepository()
+    metadata_repository.upsert(_concept("a/b"))
+
+    report = RebuildIndex(
+        concept_repository,
+        IndexConcept(FakeEmbedding(), FakeVectorSearch(), metadata_repository),
+        metadata_repository,
+    ).run()
+
+    assert report.pruned == []

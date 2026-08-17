@@ -150,6 +150,10 @@ class SqliteMetadataRepository:
             ).fetchall()
         return [row[0] for row in rows]
 
+    def list_ids(self) -> list[str]:
+        rows = self._connection.execute("SELECT id FROM concepts ORDER BY id").fetchall()
+        return [row[0] for row in rows]
+
     def search_fts(self, query: str, k: int) -> list[CandidateMatch]:
         match_expression = _fts_match_expression(query)
         if match_expression is None:

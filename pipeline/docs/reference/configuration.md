@@ -32,6 +32,7 @@ shell, a container, or a CI secret.
 | `OLLAMA_MAX_PREDICT_TOKENS` | `2048` | Caps `num_predict` on every generate call, so a model stuck repeating can't hang a run indefinitely. |
 | `OLLAMA_MAX_RETRIES` | `3` | Retries on connection errors, timeouts, and 5xx responses, with exponential backoff. A 4xx is never retried. See [`OllamaClient._post`](../architecture/ports-and-adapters.md#skill-ports-applicationportsskills). |
 | `OLLAMA_RETRY_BACKOFF_SECONDS` | `1.0` | Base backoff; attempt *n* waits `backoff * 2^(n-1)` seconds. |
+| `PASSAGE_CONTEXT_CHARS` | `1200` | How much neighbouring text `recall_passage` renders per side. A character budget rather than a passage count, because chunks range from a heading to 4000 characters, which would make the cost of `context=1` unpredictable. Truncated inside-out: the text nearest the passage is the text that explains it. |
 | `CHROMA_DIR` | `<pipeline>/.data/chroma` | Where the persistent ChromaDB collection lives. |
 | `SQLITE_PATH` | `<pipeline>/.data/metadata.db` | SQLite file backing the intake tracker, the metadata repository, and the bundle audit log (three logically separate stores, one physical file — see `adapters/sqlite/schema.sql`). |
 | `SCHEMAS_DIR` | `<pipeline>/schemas` | Where `JsonFileSchemaRegistry` looks for `<Type>.schema.json` files. |

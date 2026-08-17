@@ -17,6 +17,14 @@ class MetadataRepositoryPort(Protocol):
 
     def find_ids_by_type(self, concept_type: str, domain: str | None = None) -> list[str]: ...
 
+    def list_ids(self) -> list[str]:
+        """Every concept this store knows about, regardless of type.
+
+        Deliberately not expressible as `find_ids_by_type`: the point is to
+        find ids the *vault* no longer has, and a vanished concept's type is
+        exactly the thing you cannot filter on."""
+        ...
+
     def find_links(self, concept_id: str) -> LinkGraph: ...
 
     def search_fts(self, query: str, k: int) -> list[CandidateMatch]:

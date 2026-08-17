@@ -138,6 +138,7 @@ class Settings:
     ollama_relatedness_model: str
     ollama_embed_model: str
     embed_query_instruction: str
+    passage_context_chars: int
     ollama_vision_model: str
     ollama_timeout_seconds: float
     ollama_max_predict_tokens: int
@@ -228,6 +229,7 @@ class Settings:
             embed_query_instruction=os.environ.get(
                 "EMBED_QUERY_INSTRUCTION", DEFAULT_EMBED_QUERY_INSTRUCTION
             ),
+            passage_context_chars=_int_env("PASSAGE_CONTEXT_CHARS", 1200),
             ollama_vision_model=os.environ.get("OLLAMA_VISION_MODEL", "llava"),
             ollama_timeout_seconds=_float_env("OLLAMA_TIMEOUT_SECONDS", 300.0),
             ollama_max_predict_tokens=_int_env("OLLAMA_MAX_PREDICT_TOKENS", 2048),

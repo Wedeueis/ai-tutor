@@ -238,11 +238,42 @@ Runs `RebuildIndex`: walks **every** concept in the vault and re-indexes it
 (embeds + upserts into both the vector store and the metadata store). Use
 after bulk manual edits to the vault, or to recover from a stale/corrupted
 ChromaDB or SQLite metadata store — both are fully derivable from the vault's
-markdown files. Prints the count:
+markdown files.
+
+It also **reconciles in the other direction**: any concept id still in the
+metadata store or the vector store that the vault no longer has is deleted.
+That half was missing, and its absence was not harmless — `clear` and `delete`
+both derive what to remove by walking the filesystem, so a concept whose file
+disappears by any other route leaves its rows behind permanently, and a stale
+`links` row keeps feeding `expand_neighbors`, bridging graph expansion between
+concepts that no longer relate through it.
 
 ```
 indexed 12 concept(s)
+pruned  old-concept (no longer in the bundle)
 ```
+
+## `recall <concept-id> [--source-id ID] [--context N] [--limit N]`
+
+```bash
+pipeline recall scaled-dot-product-attention
+pipeline recall scaled-dot-product-attention --source-id attention-is-all-you-need-p17
+```
+
+Shows the **original passages** a concept was distilled from, with the
+neighbouring text either side — the terminal counterpart of the
+`recall_passage` MCP tool, because a concept's faithfulness is exactly the kind
+of thing you want to check while looking at the concept.
+
+`--source-id` takes one of the concept's `sources[].id` values, which is also
+the label of any `[^footnote]` marker in its body, so you can pull up the
+passage behind a single claim. `--context` (0–3) is how many adjacent passages
+of the same document to include per side; adjacency is by ordinal, so a gap
+left by a chunk dropped as a garbled table is not bridged.
+
+Passages come from the intake store, so this prints nothing after
+`pipeline clear --reset-intake` — the concepts survive, the raw record behind
+them does not.
 
 ## `new-domain <slug> --title ... --description ...`
 

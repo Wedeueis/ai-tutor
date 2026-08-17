@@ -209,6 +209,55 @@ def get_source(concept_id: str) -> list[dict]:
 
 
 @mcp.tool()
+def recall_passage(
+    concept_id: str,
+    source_id: str | None = None,
+    context: int = 1,
+    limit: int = 3,
+) -> list[dict]:
+    """The original text a concept was distilled from, in its surrounding
+    context. Use this to check a concept against its source, or to show
+    someone how the author actually put it.
+
+    `source_id` is one of the concept's `sources[].id` values — the same
+    string a `[^footnote]` marker in its body carries — so you can ask for the
+    passage behind one specific claim rather than the concept at large. Omit
+    it for the first few passages that fed the concept.
+
+    `context` is how many neighbouring passages of the same document to
+    include either side (0-3). Passages are source material, not concepts:
+    they have no page in the vault and never appear in search results."""
+    logger.info(
+        "mcp: recall_passage(concept_id=%r, source_id=%r, context=%r)",
+        concept_id,
+        source_id,
+        context,
+    )
+    recalled = _container.recall_passages.run(
+        concept_id,
+        source_id=_none_if_blank(source_id),
+        context=context,
+        limit=limit,
+    )
+    return [
+        {
+            "source_id": item.passage.source_id,
+            "resource": (
+                f"/{item.passage.source_concept_id}.md"
+                if item.passage.source_concept_id
+                else None
+            ),
+            "locator": item.passage.locator,
+            "ordinal": item.passage.ordinal,
+            "text": item.passage.text,
+            "context_before": item.before,
+            "context_after": item.after,
+        }
+        for item in recalled
+    ]
+
+
+@mcp.tool()
 def find_entity(name: str, entity_type: str | None = None) -> list[dict]:
     """Look up a concept by name — a thin convenience over search_wiki
     scoped to entity_type (e.g. "Person", "Client"), for "who is X" style

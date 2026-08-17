@@ -46,6 +46,7 @@ from pipeline.adapters.sqlite.sqlite_bundle_log import SqliteBundleLog
 from pipeline.adapters.sqlite.sqlite_index_fingerprint import SqliteIndexFingerprint
 from pipeline.adapters.sqlite.sqlite_intake_repository import SqliteIntakeRepository
 from pipeline.adapters.sqlite.sqlite_metadata_repository import SqliteMetadataRepository
+from pipeline.adapters.sqlite.sqlite_passage_reader import SqlitePassageReader
 from pipeline.application.ports.chat_model import ChatModelPort
 from pipeline.application.use_cases.audit_concept_quality import AuditConceptQuality
 from pipeline.application.use_cases.backfill_prerequisites import BackfillPrerequisites
@@ -62,6 +63,7 @@ from pipeline.application.use_cases.knowledge_agent import KnowledgeAgent
 from pipeline.application.use_cases.parse_source_documents import ParseSourceDocuments
 from pipeline.application.use_cases.prune_stale_intake import PruneStaleIntake
 from pipeline.application.use_cases.rebuild_index import RebuildIndex
+from pipeline.application.use_cases.recall_passages import RecallPassages
 from pipeline.application.use_cases.relevance_evidence_gatherer import (
     RelevanceEvidenceGatherer,
 )
@@ -210,8 +212,17 @@ class Container:
             index_concept=self.index_concept,
             bundle_log=self.bundle_log,
         )
+        self.passage_reader = SqlitePassageReader(settings.sqlite_path)
+        self.recall_passages = RecallPassages(
+            self.passage_reader, settings.passage_context_chars
+        )
         self.validate_concept = ValidateConcept(self.schema_registry)
-        self.rebuild_index = RebuildIndex(self.concept_repository, self.index_concept)
+        self.rebuild_index = RebuildIndex(
+            self.concept_repository,
+            self.index_concept,
+            self.metadata_repository,
+            self.vector_search,
+        )
         self.category_materializer = CategoryMaterializer(
             self.concept_repository, self.index_concept, self.bundle_log
         )
@@ -509,10 +520,46 @@ def clear_command(
 
 @app.command(name="index")
 def index_command() -> None:
-    """Rebuild the vector + metadata index from every concept in the vault."""
+    """Rebuild the vector + metadata index from every concept in the vault,
+    and drop rows for concepts the vault no longer has."""
     container = _container()
-    count = container.rebuild_index.run()
-    typer.echo(f"indexed {count} concept(s)")
+    report = container.rebuild_index.run()
+    typer.echo(f"indexed {report.indexed} concept(s)")
+    for concept_id in report.pruned:
+        typer.echo(f"pruned  {concept_id} (no longer in the bundle)")
+
+
+@app.command(name="recall")
+def recall_command(
+    concept_id: str,
+    source_id: str = typer.Option(None, "--source-id", help="A sources[].id / footnote label."),
+    context: int = typer.Option(1, "--context", help="Neighbouring passages per side (0-3)."),
+    limit: int = typer.Option(3, "--limit"),
+) -> None:
+    """Show the original passages a concept was distilled from.
+
+    The same thing the `recall_passage` MCP tool serves, reachable without an
+    MCP client — a concept's faithfulness is exactly the kind of thing you want
+    to check from a terminal while looking at the concept."""
+    container = _container()
+    recalled = container.recall_passages.run(
+        concept_id, source_id=source_id, context=context, limit=limit
+    )
+    if not recalled:
+        typer.echo(
+            f"No passages recorded for {concept_id}. Either it came from a "
+            "hand-written note, or the intake tracker was reset since ingest."
+        )
+        return
+    for item in recalled:
+        typer.echo(f"--- {item.passage.source_id or item.passage.id[:12]} "
+                   f"({item.passage.locator or 'no locator'})")
+        if item.before:
+            typer.echo(f"[before] {item.before}\n")
+        typer.echo(item.passage.text)
+        if item.after:
+            typer.echo(f"\n[after] {item.after}")
+        typer.echo("")
 
 
 @app.command(name="new-domain")
