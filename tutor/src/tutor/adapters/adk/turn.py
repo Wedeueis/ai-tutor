@@ -31,6 +31,10 @@ from tutor.domain.review import ReviewEvent
 logger = logging.getLogger(__name__)
 
 APP_NAME = "tutor"
+
+DEFAULT_USER_ID = "learner"
+"""There is exactly one learner (PRD v3 §1.3), so this is a constant ADK
+requires rather than an identity `tutor` tracks."""
 SKIP_COMMAND = "/skip"
 QUIT_COMMANDS = frozenset({"/quit", "/exit", "/stop"})
 """Structural, not inferred (#39). A skip is a command the interface reads
@@ -67,7 +71,7 @@ class AdkTeachingTurn:
         self,
         session_service: object,
         session_id: str,
-        user_id: str = "learner",
+        user_id: str = DEFAULT_USER_ID,
         settings: Settings | None = None,
         read: Callable[[str], str] | None = None,
         write: Callable[[str], None] | None = None,

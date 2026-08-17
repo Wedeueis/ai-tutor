@@ -21,14 +21,19 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 
 import typer
 
+from tutor.adapters.adk.transcript import AdkTranscript
 from tutor.adapters.adk.turn import AdkTeachingTurn
+from tutor.adapters.filesystem.contributions import FilesystemContributions
 from tutor.adapters.llm.assessment import LiteLlmAssessmentSkill
+from tutor.adapters.llm.discovery import LiteLlmDiscoverySkill
 from tutor.adapters.mcp.vault import McpVault
 from tutor.adapters.sqlite.learner_store import SqliteLearnerStore
 from tutor.agent import build_session_service
+from tutor.application.contributions import ContributionPass
 from tutor.application.review import ConductReview
 from tutor.application.session import DEFAULT_SESSION_SIZE, Session, compose_session
 from tutor.application.study_plan import (
@@ -199,14 +204,17 @@ async def _run_session(seed_awaitable, *, size: int, cap: int) -> None:
 
     container = _container()
     vault = container.vault()
+    settings = container.settings
+    # Named here rather than inline, because the contribution pass below needs
+    # the same two values: it reads back the very session the turns wrote.
+    session_service = build_session_service(settings)
+    session_id = f"tutor-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}"
     turns = AdkTeachingTurn(
-        session_service=build_session_service(container.settings),
-        session_id=f"tutor-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}",
-        settings=container.settings,
+        session_service=session_service,
+        session_id=session_id,
+        settings=settings,
     )
-    assessments = LiteLlmAssessmentSkill(
-        container.settings.litellm_model, container.settings.model_api_base
-    )
+    assessments = LiteLlmAssessmentSkill(settings.litellm_model, settings.model_api_base)
     session = TeachSession(
         vault,
         container.learner_store,
@@ -214,16 +222,26 @@ async def _run_session(seed_awaitable, *, size: int, cap: int) -> None:
         turns,
         visit_cap=cap,
     )
+    contributions = ContributionPass(
+        AdkTranscript(session_service),
+        LiteLlmDiscoverySkill(settings.litellm_model, settings.model_api_base),
+        FilesystemContributions(settings.inquiries_dir, settings.proposals_dir),
+    )
 
     typer.echo(f"{len(seed)} concept(s) this session. `/skip` to pass, `/quit` to stop.\n")
     try:
         report = await session.run(seed)
+        # Inside the `try`, before the vault closes: the ADK transcript this
+        # reads is disposable and only guaranteed to exist while the session is
+        # live (#39). It never raises — a session must not end in a traceback
+        # because a model was unavailable to speculate about the vault.
+        written = await contributions.run(session_id, report)
     finally:
         await vault.aclose()
-    _report(report)
+    _report(report, written)
 
 
-def _report(report: SessionReport) -> None:
+def _report(report: SessionReport, written: list[Path] | None = None) -> None:
     """Printed, never stored. There is no `sessions` table — every review was
     committed as it happened (#39)."""
     typer.echo("")
@@ -234,6 +252,10 @@ def _report(report: SessionReport) -> None:
         typer.echo(f"skipped   {', '.join(report.skipped)}")
     if report.ungraded:
         typer.echo(f"ungraded  {', '.join(report.ungraded)} (grader failed; nothing recorded)")
+    for path in written or ():
+        # Named individually: a proposal waits for a human to move it, and one
+        # nobody knows exists is one nobody approves.
+        typer.echo(f"filed     {path}")
 
 
 async def _plan(concept_id: str, max_hops: int) -> StudyPlan:

@@ -109,3 +109,29 @@ def test_no_port_method_takes_a_user_id(signature):
     parameters = inspect.signature(getattr(LearnerStorePort, signature)).parameters
 
     assert "user_id" not in parameters
+
+
+def test_nothing_leaving_tutor_can_describe_the_learner():
+    """The semantic/episodic boundary, checked at every seam that crosses it
+    (§2.1, NFR5).
+
+    `ContributionPort` is the only way out, and `DiscoveryKind` is the only
+    vocabulary that feeds it. Both are closed sets, and the enforcement is that
+    neither has a member for a blindspot — a filter that inspects content and
+    decides can be wrong, while a name that does not exist cannot be used.
+    """
+    import inspect
+
+    from tutor.application.ports.outbound.contributions import ContributionPort
+    from tutor.application.ports.outbound.discovery import DiscoveryKind
+
+    verbs = {
+        name
+        for name, _ in inspect.getmembers(ContributionPort, inspect.isfunction)
+        if not name.startswith("_")
+    }
+    kinds = {kind.value for kind in DiscoveryKind}
+
+    assert verbs == {"record_inquiry", "propose_concept"}
+    assert kinds == {"coverage_gap", "contradiction", "derived_concept"}
+    assert not any("learner" in name or "blindspot" in name for name in verbs | kinds)

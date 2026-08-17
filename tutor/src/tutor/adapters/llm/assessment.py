@@ -17,21 +17,18 @@ unenforceable.
 
 from __future__ import annotations
 
-import json
 import logging
-import re
 from typing import Any
 
 from litellm import acompletion
 
+from tutor.adapters.llm._json import as_array, as_object
 from tutor.application.ports.outbound.assessment import Assessment
 from tutor.application.ports.outbound.vault import Concept
 from tutor.domain.assessment import Rubric, RubricContent, RubricScore
 from tutor.domain.depth import DepthLevel, requirement_for
 
 logger = logging.getLogger(__name__)
-
-_JSON_BLOCK = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 
 _GENERATE = """You are writing one review question for a learner returning to
 their own knowledge vault. They wrote or saved this concept themselves; they
@@ -132,7 +129,7 @@ class LiteLlmAssessmentSkill:
                 body=concept.body,
             )
         )
-        payload = _as_object(raw)
+        payload = as_object(raw)
         question = str(payload.get("question") or "").strip()
         rubrics = _rubrics(payload.get("rubrics"))
         if not question or not rubrics:
@@ -165,7 +162,7 @@ class LiteLlmAssessmentSkill:
         )
         returned = {
             str(entry["rubric_id"]): entry
-            for entry in _as_array(raw)
+            for entry in as_array(raw)
             if isinstance(entry, dict) and "rubric_id" in entry
         }
         return [
@@ -244,38 +241,3 @@ def _score(rubric_id: str, entry: Any) -> RubricScore:
     )
 
 
-def _as_object(raw: str) -> dict[str, Any]:
-    parsed = _parse(raw)
-    return parsed if isinstance(parsed, dict) else {}
-
-
-def _as_array(raw: str) -> list[Any]:
-    parsed = _parse(raw)
-    if isinstance(parsed, list):
-        return parsed
-    # A grader scoring exactly one rubric sometimes returns the bare object.
-    return [parsed] if isinstance(parsed, dict) else []
-
-
-def _parse(raw: str) -> Any:
-    """Tolerant JSON extraction: small local models fence their output, prefix
-    it with prose, or leak reasoning ahead of it (#12)."""
-    text = raw.strip()
-    fenced = _JSON_BLOCK.search(text)
-    if fenced:
-        text = fenced.group(1).strip()
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    start = min((i for i in (text.find("{"), text.find("[")) if i != -1), default=-1)
-    end = max(text.rfind("}"), text.rfind("]"))
-    if start == -1 or end <= start:
-        logger.warning("no JSON found in model output")
-        return None
-    try:
-        return json.loads(text[start : end + 1])
-    except json.JSONDecodeError:
-        logger.warning("model output was not parseable JSON")
-        return None
