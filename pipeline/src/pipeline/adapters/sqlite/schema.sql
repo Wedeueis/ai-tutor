@@ -48,6 +48,11 @@ CREATE TABLE IF NOT EXISTS intake_items (
     kind TEXT NOT NULL,
     state TEXT NOT NULL,
     parent_id TEXT,
+    -- 0-based position of a chunk within its parent document; NULL for
+    -- file-backed items. Previously this existed only inside the id hash, so
+    -- ordering was unrecoverable (every chunk of a document shares one
+    -- `discovered_at`). It is what makes a §5.1 `sources[].id` human-legible.
+    ordinal INTEGER,
     error_message TEXT,
     discovered_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -77,4 +82,25 @@ CREATE TABLE IF NOT EXISTS bundle_log (
     concept_id TEXT,
     raw_id TEXT,
     message TEXT NOT NULL
+);
+
+-- What produced the vectors currently in ChromaDB. One row by construction.
+--
+-- There was never such a record, and that was a real hazard: the embedding
+-- model is a config value, nothing stored the dimension or the model name, and
+-- Chroma infers dimension from the first vector written. Changing
+-- OLLAMA_EMBED_MODEL therefore did not fail — it silently mixed vector spaces
+-- and degraded every search, with the only mitigation being a comment asking
+-- people not to. This table turns that comment into a check.
+--
+-- `query_instruction` is included because it is part of what the index means:
+-- it does NOT invalidate stored vectors (the document side carries no
+-- instruction), but a changed instruction changes what a query retrieves, and
+-- an operator debugging poor results needs to see it.
+CREATE TABLE IF NOT EXISTS index_fingerprint (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    embed_model TEXT NOT NULL,
+    dimensions INTEGER NOT NULL,
+    query_instruction TEXT NOT NULL DEFAULT '',
+    recorded_at TEXT NOT NULL
 );

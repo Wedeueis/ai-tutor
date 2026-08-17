@@ -15,3 +15,8 @@ class RawItem:
     and anything else. Read only by IngestRawMaterial, purely for §5.1
     provenance stamping — KnowledgeAgent's decision-making never looks at
     this, chunks and raw notes are still judged identically."""
+
+    ordinal: int | None = None
+    """Position in the parent document, 0-based — carried alongside
+    `source_id` for the same reason and read by the same caller: it is half of
+    the §5.1 `sources[].id` this chunk earns on the concept it produces."""

@@ -34,7 +34,14 @@ class FilesystemRawMaterialRepository:
                     content = self._scanner.read_text(item.path)
                 else:
                     raise ValueError(f"intake item {item.id} has neither content nor path")
-                raw_items.append(RawItem(id=item.id, content=content, source_id=item.parent_id))
+                raw_items.append(
+                    RawItem(
+                        id=item.id,
+                        content=content,
+                        source_id=item.parent_id,
+                        ordinal=item.ordinal,
+                    )
+                )
         return raw_items
 
     def mark_processed(self, raw_id: str) -> None:

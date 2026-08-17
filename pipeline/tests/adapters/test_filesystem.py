@@ -7,6 +7,7 @@ from pipeline.domain.concept import (
     ConceptId,
     Frontmatter,
     Generated,
+    Source,
     VerificationEvent,
 )
 from pipeline.domain.eval import EvalResult, RubricScore
@@ -93,3 +94,50 @@ def test_delete_removes_the_file(tmp_path):
 def test_delete_is_a_noop_when_concept_does_not_exist(tmp_path):
     repo = MarkdownConceptRepository(tmp_path)
     repo.delete(ConceptId("does-not-exist"))  # must not raise
+
+
+def test_every_source_field_survives_a_round_trip(tmp_path):
+    """`_sources_list` is an allow-list, not a passthrough: a key it does not
+    name is silently dropped the next time the concept is saved. That is a
+    data-loss bug nobody would see, so every field is pinned here rather than
+    only the one that was added last."""
+    repo = MarkdownConceptRepository(tmp_path)
+    source = Source(
+        resource="/references/the-book.md",
+        id="the-book-p17",
+        title="The Book",
+        author="human:someone",
+        usage_count=3,
+        last_modified="2026-01-02",
+        locator="passage 17",
+    )
+    repo.save(
+        Concept(
+            id=ConceptId("a/b"),
+            frontmatter=Frontmatter(type="Playbook", sources=[source]),
+            body="Prose.[^the-book-p17]",
+        )
+    )
+
+    loaded = repo.load(ConceptId("a/b"))
+
+    assert loaded.frontmatter.sources == [source]
+
+
+def test_a_locator_survives_two_round_trips(tmp_path):
+    """The drop would happen on *re-save*, not on first write — so one
+    save/load is not enough to catch it."""
+    repo = MarkdownConceptRepository(tmp_path)
+    concept = Concept(
+        id=ConceptId("a/b"),
+        frontmatter=Frontmatter(
+            type="Playbook",
+            sources=[Source(resource="/references/x.md", id="x-p1", locator="p. 42")],
+        ),
+        body="Prose.",
+    )
+    repo.save(concept)
+
+    repo.save(repo.load(ConceptId("a/b")))
+
+    assert repo.load(ConceptId("a/b")).frontmatter.sources[0].locator == "p. 42"

@@ -21,7 +21,14 @@ from pipeline.application.use_cases.index_concept import IndexConcept
 from pipeline.application.use_cases.knowledge_agent import KnowledgeAgent
 from pipeline.domain.agent import CreateDecision, MergeDecision, RejectDecision, RelatedConcept
 from pipeline.domain.concept import Concept, ConceptId, Frontmatter, Source
-from pipeline.domain.linking import add_link_section, add_related_links, insert_before_related
+from pipeline.domain.linking import (
+    add_footnote,
+    add_link_section,
+    add_related_links,
+    cite,
+    cite_body,
+    insert_before_related,
+)
 from pipeline.domain.prerequisites import PrerequisiteEdge
 from pipeline.domain.raw_material import RawItem
 from pipeline.domain.slug import slugify
@@ -31,12 +38,44 @@ _DERIVED_CONCEPTS_HEADING = "## Derived concepts"
 logger = logging.getLogger(__name__)
 
 
+def _source_id(source_concept_id: str, raw: RawItem) -> str:
+    """A stable §5.1 `sources[].id` — and therefore a footnote label.
+
+    `<document-slug>-p<ordinal>` reads as something a person can act on, which
+    a content hash does not. The ordinal is the chunk's position in the parsed
+    document; a chunk written before that column existed falls back to a short
+    hash prefix, which is ugly but still stable and still unique."""
+    slug = source_concept_id.rsplit("/", 1)[-1]
+    if raw.ordinal is not None:
+        return f"{slug}-p{raw.ordinal}"
+    return f"{slug}-{raw.id[:8]}"
+
+
+def _locator(raw: RawItem) -> str | None:
+    """Where in the document, in display text (§5.1, v0.3).
+
+    `passage N` rather than a page number, because the chunker works over
+    exported markdown and page provenance is not carried through it yet. The
+    field is opaque by design, so tightening this to `p. 42` later changes
+    what readers see without changing the schema or the spec."""
+    return None if raw.ordinal is None else f"passage {raw.ordinal}"
+
+
 def _add_source(
-    frontmatter: Frontmatter, source_concept_id: str, hub: Concept | None = None
-) -> Frontmatter:
-    """Adds a §5.1 `sources[]` entry pointing at the given reference-hub
-    concept, deduped by resource — a concept can merge several chunks from
-    the same source, and must not accumulate duplicate identical entries.
+    frontmatter: Frontmatter,
+    source_concept_id: str,
+    hub: Concept | None,
+    raw: RawItem,
+) -> tuple[Frontmatter, str]:
+    """Adds a §5.1 `sources[]` entry for **one contributing passage**, and
+    returns the entry's `id` so the body can cite it.
+
+    Deduped by `(resource, id)` rather than by `resource` alone. That is the
+    whole change: a concept merged from four chunks of one book used to
+    collapse into a single entry saying only "this came from the book
+    somewhere", and now carries four, each naming its passage. §5.1 permits a
+    repeated `resource`, and `id` is the field it defines for exactly this —
+    *"a stable key used to attribute individual claims"*.
 
     Carries the hub's own credibility signals (`author`, `last_modified`)
     onto the entry, so a consumer judging this concept can see them without
@@ -44,17 +83,39 @@ def _add_source(
     cannot be recovered later (ADR 0001). Whatever the hub doesn't have stays
     `None`: absent means *unknown*, which is neutral, never low."""
     resource = f"/{source_concept_id}.md"
-    if any(s.resource == resource for s in frontmatter.sources):
-        return frontmatter
+    entry_id = _source_id(source_concept_id, raw)
+    if any(s.resource == resource and s.id == entry_id for s in frontmatter.sources):
+        return frontmatter, entry_id
 
     author, last_modified = _credibility_signals(hub)
-    return replace(
-        frontmatter,
-        sources=[
-            *frontmatter.sources,
-            Source(resource=resource, author=author, last_modified=last_modified),
-        ],
+    return (
+        replace(
+            frontmatter,
+            sources=[
+                *frontmatter.sources,
+                Source(
+                    resource=resource,
+                    id=entry_id,
+                    title=hub.frontmatter.title if hub else None,
+                    author=author,
+                    last_modified=last_modified,
+                    locator=_locator(raw),
+                ),
+            ],
+        ),
+        entry_id,
     )
+
+
+def _footnote_text(hub: Concept | None, source_concept_id: str, raw: RawItem) -> str:
+    """The human-facing half of a footnote.
+
+    §5.1 is explicit that consumers resolve attribution through the matching
+    `sources` entry and *not* by parsing this prose, so it is free to be
+    readable rather than structured."""
+    title = (hub.frontmatter.title if hub else None) or source_concept_id
+    locator = _locator(raw)
+    return f"{title} — {locator}" if locator else title
 
 
 def _credibility_signals(hub: Concept | None) -> tuple[str | None, str | None]:
@@ -153,10 +214,20 @@ class IngestRawMaterial:
                     concept, decision.new_categories, raw.id
                 )
                 if source_concept_id:
+                    frontmatter, entry_id = _add_source(
+                        concept.frontmatter, source_concept_id, source_hub, raw
+                    )
+                    # Cited on create as well as on merge, so every body is
+                    # attributed by the same rule. A concept that later merges
+                    # a second passage then needs no retro-marking of the text
+                    # that was already there — one code path, no special case.
                     concept = replace(
                         concept,
-                        frontmatter=_add_source(
-                            concept.frontmatter, source_concept_id, source_hub
+                        frontmatter=frontmatter,
+                        body=add_footnote(
+                            cite_body(concept.body, entry_id),
+                            entry_id,
+                            _footnote_text(source_hub, source_concept_id, raw),
                         ),
                     )
                 self._concept_repository.save(concept)
@@ -175,15 +246,26 @@ class IngestRawMaterial:
                     self._update_source_hub(concept, source_concept_id, raw.id)
             elif isinstance(decision, MergeDecision):
                 existing = self._concept_repository.load(decision.into)
-                merged_frontmatter = (
-                    _add_source(existing.frontmatter, source_concept_id, source_hub)
-                    if source_concept_id
-                    else existing.frontmatter
-                )
+                addition = decision.addition
+                merged_frontmatter = existing.frontmatter
+                merged_body = existing.body
+                if source_concept_id:
+                    merged_frontmatter, entry_id = _add_source(
+                        existing.frontmatter, source_concept_id, source_hub, raw
+                    )
+                    # A merged body now mixes text from two different passages,
+                    # which is precisely when concept-level attribution stops
+                    # being enough and the footnote starts carrying meaning.
+                    addition = cite(addition, entry_id)
+                    merged_body = add_footnote(
+                        merged_body,
+                        entry_id,
+                        _footnote_text(source_hub, source_concept_id, raw),
+                    )
                 merged = replace(
                     existing,
                     frontmatter=merged_frontmatter,
-                    body=insert_before_related(existing.body, decision.addition),
+                    body=insert_before_related(merged_body, addition),
                 )
                 self._concept_repository.save(merged)
                 self._index_concept.run(merged)

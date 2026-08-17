@@ -65,6 +65,15 @@ class IntakeItem:
     path: str | None = None  # set for file-backed items (raw notes, source documents)
     content: str | None = None  # set for DB-only items (chunks)
     parent_id: str | None = None  # source document's id, for chunks
+    ordinal: int | None = None
+    """Position in the parent document, 0-based. Set for chunks, `None` for
+    file-backed items, which have no position in anything.
+
+    Stored rather than derived because it was previously *only* baked into the
+    id hash: every chunk of a document shares one `discovered_at`, so ordering
+    was unrecoverable. It is what makes a §5.1 `sources[].id` legible
+    (`the-paper-p17` rather than a hex digest) and what lets a passage be
+    located within its document."""
     error_message: str | None = None
     discovered_at: datetime | None = None
     updated_at: datetime | None = None

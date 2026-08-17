@@ -1,6 +1,6 @@
 # Open Knowledge Format (OKF)
 
-**Version 0.2**
+**Version 0.3**
 
 OKF is an open, human- and agent-friendly format for representing
 *knowledge*: the metadata, context, and curated insight that surrounds
@@ -13,8 +13,8 @@ no required tooling. If you can `cat` a file, you can read OKF; if you
 can `git clone` a repo, you can ship it.
 
 This document is self-contained: it specifies everything needed to
-produce and consume OKF v0.2. A summary of what changed from v0.1 is in
-§13.
+produce and consume OKF v0.3. A summary of what changed from v0.2 is in
+§14, and from v0.1 in §13.
 
 ---
 
@@ -306,6 +306,14 @@ Each `sources` entry:
 - `id`: Optional. A stable key used to attribute individual claims (see
   below). SHOULD be present when the body cites the source.
 - `title`: Optional. Human-readable label for the source.
+- `locator`: Optional. An opaque, human-readable pointer to a place *within*
+  `resource` — a page, section, heading trail, or timestamp (for example
+  `p. 42`, `passage 17`, `§3.2`, `00:14:35`). It is display text, not an
+  address: consumers MUST NOT parse it, and MUST tolerate its absence, which
+  means only that the location is unknown. Omit it where a resource has no
+  meaningful internal locations. `locator` narrows attribution *within* a
+  source; `id` identifies the entry so a claim can cite it. An entry MAY carry
+  both, and SHOULD when the body cites a specific place.
 - The optional credibility signals `author`, `usage_count`, and
   `last_modified`, described next.
 
@@ -359,6 +367,25 @@ Labels are keyed rather than positional (`sources[0]`) because agents
 constantly rewrite these documents: a positional index misattributes
 silently the moment the list is reordered, whereas a stable `id` survives
 reordering.
+
+Several entries MAY share one `resource`, distinguished by `id` and usually by
+`locator`. This is the normal shape for a concept distilled from more than one
+place in a single long document: one entry per contributing passage, so a
+reader can tell *which part* of the source a given claim came from rather than
+only that the source was involved. `id` MUST be unique within a concept's
+`sources` list, since it is the footnote join key.
+
+```yaml
+sources:
+  - resource: /references/the-book.md
+    id: the-book-p17
+    title: The Book
+    locator: passage 17
+  - resource: /references/the-book.md
+    id: the-book-p42
+    title: The Book
+    locator: passage 42
+```
 
 ### 5.2 Trust: `generated` and `verified`
 
@@ -762,7 +789,7 @@ particular, consumers MUST NOT reject a bundle because of:
 
 ## 12. Versioning
 
-This document specifies OKF version **0.2**. Revisions are versioned as
+This document specifies OKF version **0.3**. Revisions are versioned as
 `<major>.<minor>`:
 
 - A **minor** version bump introduces backward-compatible additions (new
@@ -770,7 +797,7 @@ This document specifies OKF version **0.2**. Revisions are versioned as
 - A **major** version bump may make breaking changes (renaming required
   fields, changing reserved filenames).
 
-Bundles MAY declare the version they target with `okf_version: "0.2"` in a
+Bundles MAY declare the version they target with `okf_version: "0.3"` in a
 bundle-root `index.md` frontmatter block (the only place frontmatter is
 permitted in an `index.md`). Consumers that do not understand the declared
 version SHOULD attempt best-effort consumption rather than refusing the
@@ -1001,3 +1028,33 @@ Gross profit by segment per the cost-allocation standard.[^cost-alloc]
 
 [^cost-alloc]: Cost allocation standard
 ```
+---
+
+## 14. Changes from v0.2
+
+v0.3 is a **minor** version bump under §12: purely additive, with no breaking
+changes. A v0.2 bundle is a valid v0.3 bundle unchanged, and a v0.2 consumer
+reads a v0.3 bundle correctly — the one new key is optional, and §11 already
+requires consumers to tolerate unknown frontmatter keys.
+
+### 14.1 Additive changes
+
+- **`sources[].locator`** (§5.1). An optional, opaque, human-readable pointer
+  to a place *within* a source — `p. 42`, `passage 17`, `§3.2`, `00:14:35`.
+  It is display text, never an address: consumers show it and MUST NOT parse
+  it. Absent means the location is unknown, not that none exists.
+
+  Previously the finest attribution available was "this concept came from that
+  document". For a long source — a book, a paper, a transcript — that is not
+  enough to check a claim against what the author actually wrote. `locator`
+  closes that gap without introducing a structured citation model, which would
+  have to commit to page numbers, byte offsets or timestamps and would be wrong
+  for the source types it did not anticipate.
+
+### 14.2 Clarifications
+
+- **Repeated `resource` across `sources` entries is explicitly permitted**
+  (§5.1), distinguished by `id` and usually by `locator`. This was already
+  legal by silence; it is now stated, because it is the normal shape for a
+  concept distilled from several passages of one document. `id` MUST be unique
+  within a concept's `sources` list, since it is the footnote join key.

@@ -54,6 +54,11 @@ def _sources_list(raw) -> list[Source]:
             author=entry.get("author"),
             usage_count=entry.get("usage_count"),
             last_modified=entry.get("last_modified"),
+            # Every key a `Source` carries must be listed here. This mapping is
+            # an allow-list, so an unlisted key is not "tolerated" — it is
+            # silently dropped the next time the concept is saved, which loses
+            # data on a round-trip nobody was watching.
+            locator=entry.get("locator"),
         )
         for entry in raw
     ]

@@ -72,7 +72,14 @@ with `[image: <caption>]`. The resulting text is split with
 `chunk_markdown()`; each chunk that `domain/text_quality.py::
 looks_like_garbled_table` flags as a mangled table dump (rather than prose —
 e.g. a Docling table-parse artifact) is skipped, counted in
-`ParseOutcome.skipped`, and never registered. Everything else becomes its
+`ParseOutcome.skipped`, and never registered. Each surviving chunk records its
+`ordinal` — its 0-based position in the parsed document. Skipped chunks leave a
+**gap** rather than being renumbered away, because the gap is information: it
+says two surviving chunks are not actually adjacent. The ordinal is what makes
+a §5.1 `sources[].id` legible (`the-paper-p17` rather than a hex digest), and
+`list_children` orders by it — previously it ordered by `discovered_at`, which
+every chunk of one document shares, so there was effectively no order at all.
+Everything else becomes its
 own DB-only `IntakeItem` of kind `CHUNK` (`content` set, `path` is `None`,
 `parent_id` points back at the source document). The source document itself
 transitions to state `parsed`. A chunk is still indistinguishable from a raw
@@ -93,7 +100,15 @@ Pulls every unprocessed item via `RawMaterialRepositoryPort.list_unprocessed()`
 2. For each `CreateDecision`: slugifies a title into a `ConceptId`
    (de-duplicating with a numeric suffix if the slug is already taken). If
    `source_concept_id` is set, stamps a §5.1 `sources[]` entry pointing at
-   it (deduped by resource). Builds the `Concept`, `save()`s it via
+   it — **one entry per contributing passage**, keyed `(resource, id)` where
+   `id` is `<document-slug>-p<ordinal>` and `locator` is the display pointer
+   (`passage 17`). It also cites the body: `domain/linking.py::cite_body`
+   attaches a `[^id]` marker to the prose (skipping the already-woven link
+   sections, so the marker never lands on a link bullet) and `add_footnote`
+   writes the definition under a `## Sources` heading kept *before* any
+   trailing link section. Citing on create as well as on merge means every
+   body is attributed by one rule, with no retro-marking special case.
+   Builds the `Concept`, `save()`s it via
    `ConceptRepositoryPort`, indexes it via `IndexConcept`, and appends a
    `create` entry to the SQLite audit log (`BundleLogPort`). Then:
    - for each `CreateDecision.related` entry (existing concepts the new one
@@ -110,7 +125,10 @@ Pulls every unprocessed item via `RawMaterialRepositoryPort.list_unprocessed()`
      (`domain/linking.py::add_link_section`, same dedup/idempotent shape),
      re-indexes it, and appends a `derive` entry to the audit log.
 3. For each `MergeDecision`: loads the target concept, stamps `sources[]`
-   the same way if `source_concept_id` is set, inserts the addition into its
+   the same way if `source_concept_id` is set — this is where per-passage
+   entries earn their keep, since a merged body now mixes text from two
+   passages and the `[^id]` on the addition says which claim came from where.
+   Inserts the addition into its
    body via `domain/linking.py::insert_before_related` (before any trailing
    `## Related` section, so merges never push it out of position), saves and
    re-indexes it, appends a `merge` entry to the audit log, and — same as

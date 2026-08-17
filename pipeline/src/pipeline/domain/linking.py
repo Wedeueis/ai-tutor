@@ -14,16 +14,45 @@ from pipeline.domain.prerequisites import PrerequisiteEdge
 _RELATED_HEADING = "## Related"
 _CATEGORIES_HEADING = "## Categories"
 _PREREQUISITES_HEADING = "## Prerequisites"
+_FOOTNOTES_HEADING = "## Sources"
+
+_TRAILING_HEADINGS = (
+    _FOOTNOTES_HEADING,
+    _PREREQUISITES_HEADING,
+    _CATEGORIES_HEADING,
+    _RELATED_HEADING,
+)
+"""Sections that live *after* a concept's prose, in no particular order among
+themselves. Prose additions go before all of them; `## Related` still ends up
+last because `add_link_section` only ever appends into it."""
 
 
 def insert_before_related(body: str, addition: str) -> str:
-    """Inserts `addition` immediately before a trailing `## Related` section,
-    if one exists; otherwise appends it normally. Keeps `## Related` last
-    even as merge additions accumulate after a concept was first created."""
-    index = body.find(f"\n{_RELATED_HEADING}")
+    """Inserts `addition` after the prose and before **every** trailing
+    section, so merge additions accumulate with the prose they belong to
+    rather than landing inside a link or footnote list.
+
+    Targets the *first* trailing section rather than `## Related` alone. Aiming
+    only at `## Related` was survivable while the sections in between held
+    links — an addition landing under `## Categories` was untidy but harmless.
+    It stopped being harmless once `## Sources` began carrying footnote
+    definitions: a paragraph inserted between a definition and the next one
+    reads as part of the footnote list, and the marker it carries ends up
+    detached from the prose it attributes."""
+    index = _first_trailing_section(body)
     if index == -1:
         return f"{body}\n\n{addition}"
     return f"{body[:index].rstrip()}\n\n{addition}\n\n{body[index:].strip()}\n"
+
+
+def _first_trailing_section(body: str) -> int:
+    """Index of the earliest trailing section heading, or -1 for none."""
+    found = [
+        index
+        for index in (body.find(f"\n{heading}") for heading in _TRAILING_HEADINGS)
+        if index != -1
+    ]
+    return min(found) if found else -1
 
 
 def add_link_section(body: str, heading: str, links: list[RelatedConcept]) -> str:
@@ -106,3 +135,52 @@ def _has_typed_link(body: str, concept_id: object) -> bool:
     one — see `add_prerequisite_links`. Note `_has_link` cannot serve here: it
     matches the `(/id.md)` markdown form, never the `[[/id]]` wikilink one."""
     return f"[[/{concept_id}]]" in body
+
+
+def cite(text: str, label: str) -> str:
+    """Attaches a footnote marker to a block of body text (WIKI_SPEC §5.1).
+
+    The marker goes at the end of the block's last non-empty line rather than
+    on a line of its own, because `[^label]` alone renders as a stray link.
+    Idempotent: a block already carrying this label is returned unchanged, so
+    re-running ingest over the same chunk cannot stack markers."""
+    marker = f"[^{label}]"
+    if marker in text:
+        return text
+
+    lines = text.rstrip().split("\n")
+    for index in range(len(lines) - 1, -1, -1):
+        if lines[index].strip():
+            lines[index] = f"{lines[index].rstrip()}{marker}"
+            break
+    else:
+        return text
+    return "\n".join(lines)
+
+
+def cite_body(body: str, label: str) -> str:
+    """`cite`, but aimed at a body's prose rather than at a bare block.
+
+    By the time a created concept is stamped with its source, its body already
+    carries the woven `## Categories` / `## Related` sections — so citing the
+    body's true last line would hang the footnote marker off a link bullet.
+    Everything before the first `## ` heading is the prose; that is what a
+    passage actually produced, and that is what gets the marker."""
+    index = body.find("\n## ")
+    if index == -1:
+        return cite(body, label)
+    head, tail = body[:index], body[index:]
+    return f"{cite(head, label)}\n{tail.lstrip(chr(10))}"
+
+
+def add_footnote(body: str, label: str, definition: str) -> str:
+    """Ensures `body` carries a `[^label]: ...` definition, deduped by label.
+
+    Definitions live under their own `## Sources` heading rather than at the
+    very bottom of the file, so that the module invariant holds: a trailing
+    link section stays last. Renderers that support footnotes collect them at
+    the bottom of the *rendered* page regardless of where they are written, so
+    nothing is lost by keeping the source tidy."""
+    if f"\n[^{label}]:" in body or body.startswith(f"[^{label}]:"):
+        return body
+    return _append_to_section(body, _FOOTNOTES_HEADING, f"[^{label}]: {definition}")

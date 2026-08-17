@@ -17,6 +17,23 @@ import sqlite3
 import threading
 from pathlib import Path
 
+_ADD_COLUMNS = (
+    ("intake_items", "ordinal", "INTEGER"),
+)
+"""Columns added to tables that already existed in someone's database.
+
+`schema.sql` is idempotent `CREATE TABLE IF NOT EXISTS` DDL, which is exactly
+wrong for adding a column: the table exists, so the new definition is skipped
+and the column silently never appears — every later query then fails with
+`no such column` on a database that looks fine.
+
+SQLite has no `ADD COLUMN IF NOT EXISTS`, so each entry here is attempted and
+its "duplicate column name" refusal swallowed. This is deliberately not a
+migration *framework*: there are no versions and no down-migrations, because
+every table here except `bundle_log` is derived state that `pipeline index`
+can rebuild. It exists so that adding a nullable column does not require
+every developer to delete their database."""
+
 
 class ThreadLocalSqliteConnection:
     def __init__(
@@ -38,6 +55,7 @@ class ThreadLocalSqliteConnection:
             if self._row_factory is not None:
                 connection.row_factory = self._row_factory
             connection.executescript(self._schema_sql)
+            _add_missing_columns(connection)
             connection.commit()
             self._local.connection = connection
         return connection
@@ -51,3 +69,18 @@ class ThreadLocalSqliteConnection:
         if connection is not None:
             connection.close()
             self._local.connection = None
+
+
+def _add_missing_columns(connection: sqlite3.Connection) -> None:
+    """Idempotent, and narrow on purpose: only "duplicate column name" is
+    swallowed. Any other `OperationalError` — a typo'd table, a bad type — is
+    a real defect and must surface at startup rather than be mistaken for
+    "already applied"."""
+    for table, column, declared_type in _ADD_COLUMNS:
+        try:
+            connection.execute(
+                f"ALTER TABLE {table} ADD COLUMN {column} {declared_type}"
+            )
+        except sqlite3.OperationalError as error:
+            if "duplicate column name" not in str(error).lower():
+                raise

@@ -57,6 +57,13 @@ class Source:
     author: str | None = None
     usage_count: int | None = None
     last_modified: str | None = None
+    locator: str | None = None
+    """Where *within* `resource` this entry points — `passage 17`, `p. 42`,
+    `§3.2`. Display text, deliberately opaque: consumers show it and never
+    parse it, and absent means only that the location is unknown.
+
+    Added in OKF v0.3 (§5.1). `id` says *which* entry a footnote cites;
+    `locator` says *where in the source* that entry came from."""
 
 
 @dataclass(frozen=True)

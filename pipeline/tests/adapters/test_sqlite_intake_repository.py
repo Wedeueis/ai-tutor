@@ -120,3 +120,48 @@ def test_link_and_list_concepts(tmp_path):
 
     assert repo.list_concepts_for("hash1") == ["espresso-ratio"]
     repo.close()
+
+
+def test_a_chunk_ordinal_round_trips(tmp_path):
+    """It was previously baked into the id hash only, so it existed but could
+    not be read back."""
+    repo = SqliteIntakeRepository(tmp_path / "intake.db")
+    repo.upsert(
+        _item(
+            id="chunk-a",
+            kind=IntakeKind.CHUNK,
+            path=None,
+            content="text",
+            parent_id="doc-1",
+            ordinal=17,
+        )
+    )
+
+    assert repo.get("chunk-a").ordinal == 17
+
+
+def test_a_file_backed_item_has_no_ordinal(tmp_path):
+    """A note on disk has no position in anything."""
+    repo = SqliteIntakeRepository(tmp_path / "intake.db")
+    repo.upsert(_item(id="note-a"))
+
+    assert repo.get("note-a").ordinal is None
+
+
+def test_children_come_back_in_document_order(tmp_path):
+    """Every chunk of a document is written in one loop with one shared
+    timestamp, so ordering by `discovered_at` was really no ordering at all."""
+    repo = SqliteIntakeRepository(tmp_path / "intake.db")
+    for ordinal in (2, 0, 1):
+        repo.upsert(
+            _item(
+                id=f"chunk-{ordinal}",
+                kind=IntakeKind.CHUNK,
+                path=None,
+                content=f"text {ordinal}",
+                parent_id="doc-1",
+                ordinal=ordinal,
+            )
+        )
+
+    assert [item.ordinal for item in repo.list_children("doc-1")] == [0, 1, 2]

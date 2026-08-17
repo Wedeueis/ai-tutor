@@ -126,6 +126,12 @@ class ParseSourceDocuments:
                     path=None,
                     content=chunk_text,
                     parent_id=source.id,
+                    # Position in the *document*, so a skipped garbled table
+                    # leaves a gap rather than being renumbered away. The gap
+                    # is information: it says chunks 2 and 4 are not actually
+                    # adjacent, which is exactly what a reader reconstructing
+                    # surrounding context needs to know.
+                    ordinal=index,
                     discovered_at=now,
                     updated_at=now,
                 )

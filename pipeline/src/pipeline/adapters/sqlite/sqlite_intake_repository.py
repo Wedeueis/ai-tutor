@@ -21,6 +21,7 @@ def _row_to_item(row: sqlite3.Row) -> IntakeItem:
         path=row["path"],
         content=row["content"],
         parent_id=row["parent_id"],
+        ordinal=row["ordinal"],
         error_message=row["error_message"],
         discovered_at=datetime.fromisoformat(row["discovered_at"]),
         updated_at=datetime.fromisoformat(row["updated_at"]),
@@ -53,11 +54,13 @@ class SqliteIntakeRepository:
             self._connection.execute(
                 """
                 INSERT INTO intake_items
-                    (id, path, content, kind, state, parent_id, error_message, discovered_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, path, content, kind, state, parent_id, ordinal,
+                     error_message, discovered_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     path=excluded.path, content=excluded.content, kind=excluded.kind,
                     state=excluded.state, parent_id=excluded.parent_id,
+                    ordinal=excluded.ordinal,
                     error_message=excluded.error_message, updated_at=excluded.updated_at
                 """,
                 (
@@ -67,6 +70,7 @@ class SqliteIntakeRepository:
                     item.kind.value,
                     item.state.value,
                     item.parent_id,
+                    item.ordinal,
                     item.error_message,
                     item.discovered_at.isoformat() if item.discovered_at else None,
                     item.updated_at.isoformat() if item.updated_at else None,
@@ -89,8 +93,15 @@ class SqliteIntakeRepository:
         return [_row_to_item(row) for row in rows]
 
     def list_children(self, parent_id: str) -> list[IntakeItem]:
+        """Document order, which is what `ordinal` is for.
+
+        Previously this ordered by `discovered_at` — but every chunk of one
+        document is written in a single loop with one shared timestamp, so that
+        was really "whatever order SQLite felt like". Ordinal first, timestamp
+        only as a tiebreak for rows written before the column existed."""
         rows = self._connection.execute(
-            "SELECT * FROM intake_items WHERE parent_id = ? ORDER BY discovered_at",
+            "SELECT * FROM intake_items WHERE parent_id = ? "
+            "ORDER BY ordinal IS NULL, ordinal, discovered_at",
             (parent_id,),
         ).fetchall()
         return [_row_to_item(row) for row in rows]

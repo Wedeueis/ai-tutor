@@ -43,6 +43,7 @@ from pipeline.adapters.schema_registry.json_file_schema_registry import (
     JsonFileSchemaRegistry,
 )
 from pipeline.adapters.sqlite.sqlite_bundle_log import SqliteBundleLog
+from pipeline.adapters.sqlite.sqlite_index_fingerprint import SqliteIndexFingerprint
 from pipeline.adapters.sqlite.sqlite_intake_repository import SqliteIntakeRepository
 from pipeline.adapters.sqlite.sqlite_metadata_repository import SqliteMetadataRepository
 from pipeline.application.ports.chat_model import ChatModelPort
@@ -51,6 +52,9 @@ from pipeline.application.use_cases.backfill_prerequisites import BackfillPrereq
 from pipeline.application.use_cases.categorize_concepts import CategorizeConcepts
 from pipeline.application.use_cases.category_materializer import CategoryMaterializer
 from pipeline.application.use_cases.clear_bundle import ClearBundle
+from pipeline.application.use_cases.ensure_index_fingerprint import (
+    EnsureIndexFingerprint,
+)
 from pipeline.application.use_cases.evaluate_prerequisites import EvaluatePrerequisites
 from pipeline.application.use_cases.index_concept import IndexConcept
 from pipeline.application.use_cases.ingest_raw_material import IngestRawMaterial
@@ -117,12 +121,20 @@ class Container:
         # The provider seam (PRD v3 NFR1, issue #19). Only *text* skills move:
         # embeddings stay on `ollama` unconditionally, because every vector in
         # ChromaDB came from one embedding model and changing it invalidates
-        # the index rather than improving it. Vision (image captioning) stays
-        # local too — it is cheap, and it would otherwise ship page images of
-        # every parsed PDF off the machine.
+        # the index rather than improving it — no longer only a promise, see
+        # `index_fingerprint` below. Vision (image captioning) stays local too
+        # — it is cheap, and it would otherwise ship page images of every
+        # parsed PDF off the machine.
         chat: ChatModelPort = _chat_client(settings, ollama)
 
-        self.embedding = OllamaEmbedding(ollama, settings.ollama_embed_model)
+        self.embedding = OllamaEmbedding(
+            ollama, settings.ollama_embed_model, settings.embed_query_instruction
+        )
+        self.index_fingerprint = EnsureIndexFingerprint(
+            SqliteIndexFingerprint(settings.sqlite_path),
+            settings.ollama_embed_model,
+            settings.embed_query_instruction,
+        )
         self.extraction_skill = ExtractionSkill(chat, settings.chat_model)
         self.disambiguation_skill = EntityDisambiguationSkill(
             chat, settings.chat_model
@@ -156,7 +168,10 @@ class Container:
         self.eval_rubrics_repository = JsonFileEvalRubricsRepository(settings.evals_dir)
 
         self.index_concept = IndexConcept(
-            self.embedding, self.vector_search, self.metadata_repository
+            self.embedding,
+            self.vector_search,
+            self.metadata_repository,
+            self.index_fingerprint,
         )
         self.audit_concept_quality = AuditConceptQuality(
             self.concept_repository, self.quality_audit_skill
@@ -237,6 +252,7 @@ class Container:
             graph_category_decay=settings.search_graph_category_decay,
             rrf_k=settings.search_rrf_k,
             structured_min_results=settings.search_structured_min_results,
+            fingerprint=self.index_fingerprint,
         )
         self.trace_lineage = TraceLineage(self.metadata_repository)
         self.scan_intake = ScanIntake(self.scanner, self.intake_repository)
@@ -247,6 +263,7 @@ class Container:
             vector_search=self.vector_search,
             intake_repository=self.intake_repository,
             bundle_log=self.bundle_log,
+            fingerprint=self.index_fingerprint,
         )
         self.parse_source_documents = ParseSourceDocuments(
             self.intake_repository,

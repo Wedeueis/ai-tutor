@@ -374,7 +374,9 @@ def test_create_stamps_sources_and_updates_the_hub():
         frontmatter=Frontmatter(type="Source Document", title="Attention Is All You Need"),
         body="Source document parsed from `raw/Attention Is All You Need.pdf`.",
     )
-    raw = RawItem(id="chunk-1", content="Adam is an optimizer.", source_id="source-1")
+    raw = RawItem(
+        id="chunk-1", content="Adam is an optimizer.", source_id="source-1", ordinal=17
+    )
     draft = DraftConcept(
         frontmatter=Frontmatter(type="Unclassified", title="Adam Optimizer"),
         body="Adam is an optimizer.",
@@ -391,7 +393,20 @@ def test_create_stamps_sources_and_updates_the_hub():
 
     new_id = outcomes[0].created[0]
     saved = concept_repository.load(new_id)
-    assert saved.frontmatter.sources == [Source(resource=f"/{hub_id}.md")]
+    assert saved.frontmatter.sources == [
+        Source(
+            resource=f"/{hub_id}.md",
+            id="attention-is-all-you-need-p17",
+            title="Attention Is All You Need",
+            locator="passage 17",
+        )
+    ]
+    # The id is a footnote label, and the body cites it (§5.1).
+    assert "[^attention-is-all-you-need-p17]" in saved.body
+    assert (
+        "[^attention-is-all-you-need-p17]: Attention Is All You Need — passage 17"
+        in saved.body
+    )
 
     updated_hub = concept_repository.load(hub_id)
     assert f"(/{new_id}.md)" in updated_hub.body
@@ -402,7 +417,7 @@ def test_create_stamps_sources_and_updates_the_hub():
     )
 
 
-def test_merge_stamps_sources_deduped_across_repeated_merges():
+def test_merge_stamps_one_source_entry_per_contributing_passage():
     hub_id = ConceptId("references/attention-is-all-you-need")
     hub = Concept(
         id=hub_id, frontmatter=Frontmatter(type="Source Document", title="Attention"), body="Stub."
@@ -411,8 +426,8 @@ def test_merge_stamps_sources_deduped_across_repeated_merges():
     existing = Concept(
         id=existing_id, frontmatter=Frontmatter(type="Playbook", title="Espresso"), body="existing"
     )
-    raw1 = RawItem(id="chunk-1", content="More detail 1.", source_id="source-1")
-    raw2 = RawItem(id="chunk-2", content="More detail 2.", source_id="source-1")
+    raw1 = RawItem(id="chunk-1", content="More detail 1.", source_id="source-1", ordinal=3)
+    raw2 = RawItem(id="chunk-2", content="More detail 2.", source_id="source-1", ordinal=9)
     draft1 = DraftConcept(
         frontmatter=Frontmatter(type="Unclassified", title="Espresso"),
         body="More detail 1.",
@@ -435,7 +450,19 @@ def test_merge_stamps_sources_deduped_across_repeated_merges():
     use_case.run()
 
     merged = concept_repository.load(existing_id)
-    assert merged.frontmatter.sources == [Source(resource=f"/{hub_id}.md")]
+    # Two passages of one document contributed, so there are two entries —
+    # this is the point of keying on `(resource, id)` instead of `resource`.
+    # The old behaviour collapsed both into "came from the book, somewhere".
+    assert [source.id for source in merged.frontmatter.sources] == [
+        "attention-is-all-you-need-p3",
+        "attention-is-all-you-need-p9",
+    ]
+    assert {source.resource for source in merged.frontmatter.sources} == {
+        f"/{hub_id}.md"
+    }
+    # And the body attributes each claim to the passage it came from.
+    assert "More detail 1.[^attention-is-all-you-need-p3]" in merged.body
+    assert "More detail 2.[^attention-is-all-you-need-p9]" in merged.body
 
     updated_hub = concept_repository.load(hub_id)
     # Merged twice from the same source into the same concept — the hub
@@ -681,7 +708,8 @@ def test_a_hub_predating_signal_capture_does_not_break_ingest():
     outcomes = use_case.run()
 
     source = concept_repository.load(outcomes[0].created[0]).frontmatter.sources[0]
-    assert source == Source(resource=f"/{hub.id}.md")
+    assert source.resource == f"/{hub.id}.md"
+    assert source.author is None and source.last_modified is None
 
 
 def test_no_credibility_score_is_ever_written():
@@ -711,8 +739,12 @@ def test_no_credibility_score_is_ever_written():
         "author",
         "usage_count",
         "last_modified",
+        "locator",
     }
     assert source.usage_count is None  # episodic; lives in `tutor`, never here
+    # The guard is against a *score*, not against the field set growing: every
+    # name above is a signal or a pointer, and none of them is a judgement.
+    assert not any("score" in name or "rating" in name for name in vars(source))
 
 
 def test_a_relevance_rejection_is_recorded_in_the_bundle_log():
